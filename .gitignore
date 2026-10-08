@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+node_modules
+dist
+*.local
+
+# Build output
+lib/
+
+# Generated git hooks
+.githooks/
+
+# Editor directories and files
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Code coverage
+*.lst
+
+*.exe
+*.dll
+*.pdb
+*.map
+
+.dsh-smoke/
+pnpm-lock.yaml
+
+# Persistent undo store (default dir)
+# Persistent undo store (default dir)
+.dsh-merge-edit/
+
+# Anchor-pool generator download cache
+.anchor-pool-cache/
+
+# Python artifacts
+scripts/__pycache__/
