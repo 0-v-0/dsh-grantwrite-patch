@@ -36,8 +36,8 @@
  *
  * 降级状态的跨进程传播（双判据，均为自包含）：
  *   判据 1（状态文件）：服务端首次观测到标签降级时写状态文件——**主路径在插件目录**
- *   （`__dirname/../.degraded.state`，零环境依赖；tmpdir 路径为兼容回退，但沙箱 runner
- *   的 TMP/TEMP 常被改写到会话私有目录，os.tmpdir() 不可靠）。runner 每次
+ *   （`<DSH_HOME|~/.dsh>/grantwrite-patch/degraded.state`；tmpdir 路径为兼容回退，但沙箱
+ *   runner 的 TMP/TEMP 常被改写到会话私有目录，os.tmpdir() 不可靠）。runner 每次
  *   setTokenInformation(TokenIntegrityLevel) 前现读，长生命周期进程也能感知服务端的
  *   新判定。服务端每次启动先清状态文件（新 run 重新判定）。
  *   判据 2（标签直侦测）：runner 从自身 argv 取 --workspace，直接读该目录有无 Low
@@ -82,23 +82,47 @@ function getKoffi() {
 	return koffiRef ?? null
 }
 
+const DSH_HOME_DIR_NAME = '.dsh'
+const DSH_HOME_ENV = 'DSH_HOME'
+/**
+ * 与插件主机同源的 Harness home 解析（CJS 自包含，不依赖 src/index.ts）：
+ * 显式 DSH_HOME > ~/.dsh。
+ */
+function resolveDshHome() {
+	const os = require('os')
+	const path = require('path')
+	const fromEnv = process.env[DSH_HOME_ENV]
+	const base =
+		fromEnv !== undefined && fromEnv.trim().length > 0
+			? fromEnv.trim()
+			: path.join(os.homedir(), DSH_HOME_DIR_NAME)
+	const expanded =
+		base === '~'
+			? os.homedir()
+			: (base.startsWith('~/') || base.startsWith('~\\')
+				? path.join(os.homedir(), base.slice(2))
+				: base)
+	return path.resolve(expanded)
+}
+
 /**
  * 降级状态文件的所有候选路径。
- * 主路径在插件目录（`__dirname/../.degraded.state`）——**零环境依赖**：沙箱 runner 的
- * TMP/TEMP 常被改写到会话私有目录，`os.tmpdir()` 会指错地方。tmpdir 路径保留为兼容回退。
+ * 主路径在 Harness home（`<DSH_HOME|~/.dsh>/grantwrite-patch/degraded.state`）——
+ * 服务端与 runner 同源同环境，解析一致且都可写；沙箱 runner 的 TMP/TEMP 常被改写
+ * 到会话私有目录，`os.tmpdir()` 会指错地方，仅保留为兼容回退。
  */
 function stateFilePaths() {
 	const paths = []
 	try {
-		const { join } = require('path')
-		paths.push(join(__dirname, '..', '.degraded.state'))
+		const path = require('path')
+		paths.push(path.join(resolveDshHome(), 'grantwrite-patch', 'degraded.state'))
 	} catch {
-		/* __dirname 不可用时跳过 */
+		/* home 解析失败时跳过 */
 	}
 	try {
 		const os = require('os')
-		const { join } = require('path')
-		paths.push(join(os.tmpdir(), 'dsh-grantwrite-patch-shared.state'))
+		const path = require('path')
+		paths.push(path.join(os.tmpdir(), 'dsh-grantwrite-patch-shared.state'))
 	} catch {
 		/* tmpdir 不可用时跳过 */
 	}
@@ -125,6 +149,7 @@ function markDegraded() {
 	const fs = require('fs')
 	for (const p of stateFilePaths()) {
 		try {
+			fs.mkdirSync(require('path').dirname(p), { recursive: true })
 			fs.writeFileSync(p, '1')
 		} catch {
 			/* 单个路径写失败不阻塞，其他路径仍可传播 */

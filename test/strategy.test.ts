@@ -170,10 +170,11 @@ test('preload.cjs loads as CJS with expected exports', () => {
 	]) {
 		assert.equal(typeof preload[fn], 'function', fn)
 	}
-	// Marker: state paths anchored at the plugin directory (not tmpdir).
+	// Marker: state paths anchored at the Harness home (not tmpdir).
 	const primary = preload.stateFilePaths()[0]
-	assert.ok(primary.endsWith('.degraded.state'))
-	assert.ok(!primary.includes('Temp'), 'primary state path must not be under tmpdir')
+	assert.ok(primary.endsWith('degraded.state'))
+	assert.ok(primary.includes('grantwrite-patch'), 'primary state path must live under grantwrite-patch')
+	assert.ok(!primary.startsWith(os.tmpdir()), 'primary state path must not be under tmpdir')
 })
 
 test('resolveSandboxScript resolves from sandbox package assets (fake pkg)', () => {
