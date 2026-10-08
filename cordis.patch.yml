@@ -1,0 +1,50 @@
+# dsh-grantwrite-patch bundle patch: one insert, appended after base/web
+# bundle rows. Activation is service-availability driven: the entry injects the
+# optional `shell` service (see lib/index.js) and does nothing when the service
+# is absent (e.g. non-Windows compositions).
+#
+# Requires DSH >= 0.1.7-rc.1 (engines.dsh). The diagnose script is resolved at
+# runtime from the @deepseek-ai/dsh-sandbox-windows-acl package assets (shipped
+# since 0.2.x), not bundled with this plugin: on DSH 0.1.7 the package has no
+# assets, so the repair path fails closed and only the FFI patch is active.
+#
+# Default strategy (mode auto): install the FFI-level patch (lib/preload.cjs,
+# adapted from dsh-acl-sandbox-patch, MIT) so grantWrite succeeds without
+# touching any ACL; probe each workspace once and proactively repair large ones
+# (>= objectThreshold objects) so they do not pay the full-tree DACL
+# propagation on every DSH restart. The error-path repair+retry is kept as a
+# fallback for when the FFI patch cannot apply.
+
+- insert:
+    - id: grantwrite-patch
+      name: dsh-grantwrite-patch
+      config:
+        enable: true
+        # auto | patch | repair. auto (default): FFI patch for all workspaces
+        # plus proactive persistent repair for large ones. patch: FFI patch
+        # only, no proactive repair. repair: legacy behaviour (error-path
+        # repair+retry only, FFI patch disabled).
+        mode: auto
+        # Workspace object count (files+dirs) at or above which a proactive
+        # repair is triggered.
+        objectThreshold: 20000
+        # Size-probe timeout; a timed-out probe counts as large.
+        probeTimeoutMs: 10000
+        # Per-workspace probe/decision cache duration.
+        probeCooldownMs: 3600000
+        # diagnose-windows-sandbox-acl.ps1 resolved from
+        # @deepseek-ai/dsh-sandbox-windows-acl assets (DSH >= 0.2.x). Override
+        # to point at a specific copy.
+        # scriptPath: ""
+        # Recovery/report directory (-Out of the repair script). Defaults to
+        # $DSH_HOME/grantwrite-patch (~/.dsh/grantwrite-patch without DSH_HOME).
+        # outDir: ""
+        # Repair script timeout.
+        repairTimeoutMs: 120000
+        # Repair+retry rounds after the first grantWrite failure.
+        maxRetries: 1
+        # Skip a second repair of the same workspace within this window.
+        cooldownMs: 60000
+        # Annotate the thrown error with a short summary when the retry still
+        # fails; the successful path is invisible to the model either way.
+        appendDiagnostics: true

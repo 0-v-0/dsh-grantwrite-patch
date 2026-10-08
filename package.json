@@ -1,0 +1,43 @@
+{
+	"name": "dsh-grantwrite-patch",
+	"version": "0.1.0",
+	"description": "Auto-repair the Windows sandbox ACL failure 'SetNamedSecurityInfoW failed (Win32 5): grantWrite' and retry the command invisibly. FFI patch by default (dsh-acl-sandbox-patch scheme) on DSH >= 0.1.7; the ACL-repair fallback additionally requires DSH >= 0.2.x (sandbox package assets) and fails closed otherwise.",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/0-v-0/dsh-grantwrite-patch.git"
+	},
+	"type": "module",
+	"engines": {
+		"node": ">=22.18",
+		"dsh": ">=0.1.7-rc.1"
+	},
+	"main": "lib/index.js",
+	"exports": {
+		".": "./lib/index.js",
+		"./preload": "./lib/preload.cjs",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"lib",
+		"cordis.patch.yml"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json --declaration",
+		"lint": "oxlint",
+		"pretest": "pnpm run build",
+		"test": "node test/apply.test.ts && node test/index.test.ts && node test/strategy.test.ts && node test/size-probe.test.ts",
+		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json"
+	},
+	"devDependencies": {
+		"@types/node": "^22.20.4",
+		"oxlint": "^1.83.0",
+		"oxlint-tsgolint": "^7.0.2003",
+		"typescript": "^7.0.2"
+	},
+	"dsh": {
+		"bundle": {
+			"patch": "./cordis.patch.yml"
+		}
+	},
+	"license": "MIT"
+}
