@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { probeWorkspaceSize } from '../lib/size-probe.js'
+import { probeWorkspaceSize } from '../src/size-probe.ts'
 
 function makeTree(root: string, dirs: number, filesPerDir: number): void {
 	for (let d = 0; d < dirs; d++) {

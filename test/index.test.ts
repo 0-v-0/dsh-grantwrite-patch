@@ -14,7 +14,7 @@ import {
 	resolveDshHome,
 	resolveRoot,
 	runRepairScript,
-} from '../lib/index.js'
+} from '../src/index.ts'
 
 test('GRANT_WRITE_RE matches the exact production signature', () => {
 	assert.match('SetNamedSecurityInfoW failed (Win32 5): grantWrite', GRANT_WRITE_RE)

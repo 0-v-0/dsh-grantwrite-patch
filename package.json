@@ -22,7 +22,7 @@
 		"cordis.patch.yml"
 	],
 	"scripts": {
-		"build": "tsc -p tsconfig.json --declaration",
+		"build": "tsc -p tsconfig.build.json",
 		"lint": "oxlint",
 		"pretest": "pnpm run build",
 		"test": "node test/apply.test.ts && node test/index.test.ts && node test/strategy.test.ts && node test/size-probe.test.ts",

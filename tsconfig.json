@@ -10,6 +10,8 @@
 		"skipLibCheck": true,
 		"resolveJsonModule": true,
 		"erasableSyntaxOnly": true,
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
 		"outDir": "lib",
 		"rootDir": "src",
 		"types": ["node"]

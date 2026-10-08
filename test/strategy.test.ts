@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -11,7 +12,7 @@ import {
 	pickPreloadPath,
 	resolveConfig,
 	resolveSandboxScript,
-} from '../lib/index.js'
+} from '../src/index.ts'
 
 function wait(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms))
@@ -136,10 +137,11 @@ test('decideWorkspace: cooldown expiry re-decides', async () => {
 	assert.equal(repairs, 0)
 })
 
-test('pickPreloadPath returns an existing preload file', () => {
+test('pickPreloadPath returns a preload path; build ships preload.cjs next to index.js', () => {
 	const p = pickPreloadPath()
 	assert.match(p, /preload\.cjs$/)
-	assert.ok(existsSync(p))
+	const shipped = fileURLToPath(new URL('../lib/preload.cjs', import.meta.url))
+	assert.ok(existsSync(shipped))
 })
 
 test('ensureNodeOptions injects exactly once', () => {

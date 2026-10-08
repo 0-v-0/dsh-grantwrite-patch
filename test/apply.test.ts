@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { apply } from '../lib/index.js'
+import { apply } from '../src/index.ts'
 
 const WS = 'D:\\ws'
 const WIN32_ERR = () => new Error('Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite')

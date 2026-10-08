@@ -39,8 +39,8 @@ import type {
 	RepairRunner,
 	ResolvedConfig,
 	ShellSpec,
-} from './types.js'
-import { probeWorkspaceSize, type ProbeResult } from './size-probe.js'
+} from './types.ts'
+import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
 
 export const name = 'dsh-grantwrite-patch'
 export const inject = { shell: null } // optional: no shell composition -> inert
