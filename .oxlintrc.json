@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"plugins": [],
+	"plugins": ["import", "unicorn", "oxc"],
 	"categories": {
 		"correctness": "off"
 	},
@@ -12,6 +12,89 @@
 		"builtin": true
 	},
 	"rules": {
+		"no-negated-condition": "warn",
+		// ── Conflict-minimizing rules ──
+		// Import section: dedup + consistent boundary + consistent type-specifier
+		// style. (sort-imports is skipped — oxfmt sortImports already handles
+		// import ordering; a lint rule would fight the formatter.)
+		"import/no-duplicates": ["warn", { "preferInline": true }],
+		"import/newline-after-import": "warn",
+		"import/consistent-type-specifier-style": ["warn", "prefer-top-level-if-only-type-imports"],
+		// One item per line: a declaration or statement that packs several items
+		// forces every edit onto a shared line, which is exactly what turns two
+		// parallel edits into a conflict instead of two independent added lines.
+		"one-var": ["warn", "never"],
+		"no-multi-assign": "warn",
+		"no-sequences": "warn",
+		// Structural consistency: consistent braces / syntax = less churn when
+		// adding statements, fewer reformatting diffs across branches.
+		"curly": "warn",
+		"no-useless-computed-key": "warn",
+		"object-shorthand": "warn",
+		"prefer-template": "warn",
+		"prefer-object-spread": "warn",
+		"sort-keys": "warn",
+		"unicorn/switch-case-braces": "warn",
+		"unicorn/no-nested-ternary": "warn",
+		"unicorn/consistent-template-literal-escape": "warn",
+		// Canonical branch shape: when there is exactly one idiomatic way to
+		// write a branch, two people extending the same if/switch produce the
+		// same shape, and the merge stays a textual one.
+		"no-else-return": "warn",
+		"no-unneeded-ternary": "warn",
+		"operator-assignment": "warn",
+		// Object-only: array destructuring is often positional and rewriting it
+		// would reorder lines, which is churn we do not want.
+		"prefer-destructuring": [
+			"warn",
+			{
+				"VariableDeclarator": { "object": true, "array": false },
+				"AssignmentExpression": { "object": true, "array": false }
+			}
+		],
+		// Deterministic append points: default/optional members must sit last,
+		// so adding a case or a param appends a line instead of shifting the
+		// neighbors that another branch is editing.
+		"default-case-last": "warn",
+		"default-param-last": "warn",
+		"no-case-declarations": "warn",
+		"import/first": "warn",
+		"vars-on-top": "warn",
+		// Size limits: conflicts are a function of how many people touch the
+		// same region, so keep units small enough to be owned by one change.
+		// Warn-only nudges toward splitting, not CI gates.
+		"max-lines": ["warn", { "max": 400, "skipBlankLines": true, "skipComments": true }],
+		"max-lines-per-function": [
+			"warn",
+			{ "max": 80, "skipBlankLines": true, "skipComments": true }
+		],
+		"max-depth": ["warn", { "max": 4 }],
+		"max-params": ["warn", { "max": 5 }],
+		"complexity": ["warn", { "max": 15 }],
+		"max-classes-per-file": ["warn", 1],
+		// Coupling: a file that imports half the repo is a file everyone edits.
+		"import/max-dependencies": ["warn", { "max": 15 }],
+		// Stable export surface. group-exports is deliberately NOT enabled —
+		// funnelling every export into one statement creates a hotspot line
+		// that every branch has to edit, which is the opposite of the goal.
+		"import/no-mutable-exports": "warn",
+		"unicorn/prefer-export-from": "warn",
+		// File identity: one convention means one name per file, so two branches
+		// cannot land `fooBar.ts` and `foo-bar.ts` side by side, and renames
+		// (the change git merges worst) stop being a matter of taste. Verified:
+		// multi-part extensions (`.test.ts`, `.d.ts`), leading underscore and
+		// leading digits all still pass. Exceptions go into `ignore` as regexes
+		// — note they must not contain backslash escapes, oxlint's config
+		// parser rejects them (invalid escape), so match on prefixes instead.
+		"unicorn/filename-case": ["warn", { "case": "kebabCase" }],
+		// ── Performance rules ──
+		"no-await-in-loop": "warn",
+		"no-useless-call": "warn",
+		"no-accumulating-spread": "warn",
+		"no-map-spread": "warn",
+		"prefer-array-find": "warn",
+		"prefer-array-flat-map": "warn",
+		"prefer-set-has": "warn",
 		// These two tsgolint rules require type-aware checking with
 		// strictNullChecks (tsconfig.json: strictNullChecks: true, strict:
 		// false). They are off at the top level (applies outside the type-aware
@@ -155,6 +238,39 @@
 				"typescript/no-unsafe-member-access": "off",
 				"typescript/no-unsafe-return": "off",
 				"typescript/no-unsafe-unary-minus": "off"
+			}
+		},
+		{
+			// Type-level spelling consistency. The same type written two ways
+			// (`T[]` vs `Array<T>`, `interface` vs `type`, `Record<K, V>` vs
+			// `{ [k: K]: V }`, `{ (): void }` vs `() => void`) is a purely
+			// cosmetic diff that still collides with real changes on merge,
+			// and it silently spreads via copy-paste.
+			"files": ["src/**/*.{ts,tsx}"],
+			"plugins": ["typescript"],
+			"rules": {
+				"typescript/array-type": ["warn", { "default": "array-simple" }],
+				"typescript/consistent-type-definitions": ["warn", "interface"],
+				"typescript/consistent-indexed-object-style": ["warn", "record"],
+				"typescript/consistent-type-assertions": ["warn", { "assertionStyle": "as" }],
+				"typescript/prefer-function-type": "warn",
+				// Overloads that drift apart are edited in two places; keeping
+				// them adjacent keeps the change single-hunk.
+				"typescript/adjacent-overload-signatures": "warn"
+			}
+		},
+		{
+			// Size limits are nudges for source, not for tests: specs are
+			// legitimately long (fixtures, per-case describes) and splitting
+			// them on line count would only add churn.
+			"files": ["**/*.{test,spec}.{ts,tsx}", "**/__tests__/**/*.{ts,tsx}"],
+			"rules": {
+				"max-lines": "off",
+				"max-lines-per-function": "off",
+				"max-statements": "off",
+				"max-depth": "off",
+				"complexity": "off",
+				"max-classes-per-file": "off"
 			}
 		}
 	]
