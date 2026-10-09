@@ -136,6 +136,7 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 		appendDiagnostics: true,
 		cooldownMs: 60000,
 		enable: true,
+		grantFallback: true,
 		maxRetries: 1,
 		mode: 'auto',
 		objectThreshold: 20000,
@@ -218,6 +219,84 @@ export function runRepairScript(root: string, opts: ResolvedConfig): Promise<Rep
 				...(trimmedStderr === '' ? {} : { stderr: trimmedStderr }),
 			})
 		})
+	})
+}
+
+/** True when p is a Windows drive root ("D:\", "D:/", "D:").
+ * Used to refuse granting FullControl on a whole drive — grant only real workspaces. */
+export function isDriveRoot(p: string): boolean {
+	// path.normalize('D:') -> 'D:\\.' on win32; strip trailing dots/slashes, then match X:
+	const norm = path
+		.normalize(p)
+		.replace(/[\\/]+$/, '')
+		.replace(/\.+$/, '')
+	return /^[A-Za-z]:$/i.test(norm)
+}
+
+/** Resolve the current user account name for icacls /grant. */
+export function currentUserName(): string {
+	return (process.env.USERNAME ?? process.env.USER ?? os.userInfo().username).trim()
+}
+
+/**
+ * Fallback repair: a bare `icacls <root> /grant "<user>:(OI)(CI)F"`.
+ * Used when the diagnose script is unavailable (DSH 0.1.7 has no assets) or fails.
+ * Refuses drive roots for safety. Does not touch inheritance policy or deny ACEs;
+ * roll back with `icacls <root> /remove:g "<user>"`. Never rejects.
+ */
+export function grantFullControl(root: string, opts: ResolvedConfig): Promise<RepairOutcome> {
+	if (isDriveRoot(root)) {
+		return Promise.resolve({
+			ok: false,
+			stderr: 'refused: grantFullControl denied on a drive root (not a workspace)',
+		})
+	}
+	const user = currentUserName()
+	if (!user) {
+		return Promise.resolve({ ok: false, stderr: 'no current user name to grant to' })
+	}
+	return new Promise((resolve) => {
+		const child = spawn(
+			'pwsh',
+			[
+				'-NoLogo',
+				'-NoProfile',
+				'-NonInteractive',
+				'-Command',
+				`icacls '${root.replace(/'/g, "''")}' /grant '${user.replace(/'/g, "''")}:(OI)(CI)F'`,
+			],
+			{ stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+		)
+		let stdout = ''
+		let stderr = ''
+		child.stdout.on('data', (d: Buffer) => (stdout += d.toString()))
+		child.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
+		const timer = setTimeout(() => child.kill(), opts.repairTimeoutMs)
+		child.on('error', (e) => {
+			clearTimeout(timer)
+			resolve({ ok: false, stderr: `spawn pwsh failed: ${e.message}` })
+		})
+		child.on('close', (code) => {
+			clearTimeout(timer)
+			const trimmed = stderr.trim()
+			resolve({
+				ok: code === 0 && /Successfully processed/i.test(stdout),
+				...(trimmed === '' ? {} : { stderr: trimmed }),
+			})
+		})
+	})
+}
+
+/**
+ * Combined runner: try the diagnose script first (0.2.x assets; safer — has
+ * -AllowRoot bounds, backup, verify), fall back to grantFullControl (bare icacls)
+ * when the script is unavailable or fails and grantFallback is on. Drive roots are
+ * refused either way.
+ */
+export function runRepair(root: string, opts: ResolvedConfig): Promise<RepairOutcome> {
+	return runRepairScript(root, opts).then((outcome) => {
+		if (outcome.ok || !opts.grantFallback) {return outcome}
+		return grantFullControl(root, opts)
 	})
 }
 
@@ -403,7 +482,7 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 	if (!opts.enable) {return}
 	const orig = (shell[method] as (spec: ShellSpec) => Promise<unknown>).bind(shell)
 	const state = makeRecoveryState()
-	const runner = deps.runner ?? runRepairScript
+	const runner = deps.runner ?? runRepair
 	const probe = deps.probe ?? probeWorkspaceSize
 	const labelProbe =
 		deps.labelProbe ??

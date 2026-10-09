@@ -6,6 +6,9 @@ import {
 	GRANT_WRITE_RE,
 	VERIFY_ACTION_RE,
 	annotateError,
+	currentUserName,
+	grantFullControl,
+	isDriveRoot,
 	isGrantWriteError,
 	isVerifiedRepair,
 	makeRecoveryState,
@@ -13,6 +16,7 @@ import {
 	resolveConfig,
 	resolveDshHome,
 	resolveRoot,
+	runRepair,
 	runRepairScript,
 } from '../src/index.ts'
 
@@ -166,5 +170,49 @@ test('runRepairScript fails closed when no sandbox-package script is resolvable 
 	assert.equal(opts.scriptPath, '')
 	const outcome = await runRepairScript('R', opts)
 	assert.equal(outcome.ok, false)
+	assert.match(outcome.stderr ?? '', /repair script not found/)
+})
+
+test('isDriveRoot: detects Windows drive roots, passes real workspaces', () => {
+	assert.ok(isDriveRoot('D:\\'))
+	assert.ok(isDriveRoot('D:/'))
+	assert.ok(isDriveRoot('D:'))
+	assert.ok(isDriveRoot('d:\\'))
+	assert.ok(!isDriveRoot('D:\\gh'))
+	assert.ok(!isDriveRoot('D:\\gh\\dsh-grantwrite-patch'))
+	assert.ok(!isDriveRoot('\\\\server\\share'))
+})
+
+test('currentUserName resolves from env or os.userInfo', () => {
+	const name = currentUserName()
+	assert.ok(typeof name === 'string' && name.length > 0)
+})
+
+test('grantFullControl refuses a drive root without spawning icacls', async () => {
+	const opts = resolveConfig({})
+	const outcome = await grantFullControl('D:\\', opts)
+	assert.equal(outcome.ok, false)
+	assert.match(outcome.stderr ?? '', /refused: grantFullControl denied on a drive root/)
+})
+
+test('runRepair falls back to grantFullControl when the script is unavailable (0.1.7), refuses drive roots', async () => {
+	// 0.1.7: no sandbox-package assets -> scriptPath empty -> runRepairScript fails closed.
+	const opts = resolveConfig({})
+	assert.equal(opts.scriptPath, '')
+	assert.equal(opts.grantFallback, true)
+	// Drive root: both paths refuse -> runRepair returns ok:false, no real icacls spawn.
+	const outcome = await runRepair('D:\\', opts)
+	assert.equal(outcome.ok, false)
+	// The fallback error message (not the script-not-found one) wins.
+	assert.match(outcome.stderr ?? '', /refused: grantFullControl denied on a drive root/)
+})
+
+test('runRepair does not fall back when grantFallback is false', async () => {
+	const opts = resolveConfig({ grantFallback: false })
+	assert.equal(opts.grantFallback, false)
+	assert.equal(opts.scriptPath, '')
+	const outcome = await runRepair('D:\\gh\\ws', opts)
+	assert.equal(outcome.ok, false)
+	// Script-not-found error propagates; grantFullControl was skipped.
 	assert.match(outcome.stderr ?? '', /repair script not found/)
 })

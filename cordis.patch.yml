@@ -48,3 +48,8 @@
         # Annotate the thrown error with a short summary when the retry still
         # fails; the successful path is invisible to the model either way.
         appendDiagnostics: true
+        # When the diagnose script is unavailable (DSH 0.1.7 has no assets)
+        # or fails, fall back to a bare `icacls <root> /grant "<user>:(OI)(CI)F`.
+        # Drive roots (D:\) are refused. Roll back with
+        # `icacls <root> /remove:g "<user>". Default true.
+        grantFallback: true

@@ -45,6 +45,10 @@ export interface RepairConfig {
 	cooldownMs?: number
 	/** Append a short diagnosis to the thrown error when the retry still fails. Default true. */
 	appendDiagnostics?: boolean
+	/** When the diagnose script is unavailable (DSH 0.1.7) or fails, fall back to
+	 * a bare `icacls <root> /grant "<user>:(OI)(CI)F"` so the repair path is not
+	 * dead on 0.1.7. The fallback refuses drive roots (D:\) for safety. Default true. */
+	grantFallback?: boolean
 }
 
 export interface ResolvedConfig extends RepairConfig {
@@ -59,6 +63,7 @@ export interface ResolvedConfig extends RepairConfig {
 	maxRetries: number
 	cooldownMs: number
 	appendDiagnostics: boolean
+	grantFallback: boolean
 }
 
 export interface RepairOutcome {

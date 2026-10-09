@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import {
 	decideWorkspace,
 	ensureNodeOptions,
@@ -175,7 +175,10 @@ test('preload.cjs loads as CJS with expected exports', () => {
 	// Marker: state paths anchored at the Harness home (not tmpdir).
 	const primary = preload.stateFilePaths()[0]
 	assert.ok(primary.endsWith('degraded.state'))
-	assert.ok(primary.includes('grantwrite-patch'), 'primary state path must live under grantwrite-patch')
+	assert.ok(
+		primary.includes('grantwrite-patch'),
+		'primary state path must live under grantwrite-patch',
+	)
 	assert.ok(!primary.startsWith(os.tmpdir()), 'primary state path must not be under tmpdir')
 })
 
