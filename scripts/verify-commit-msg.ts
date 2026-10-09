@@ -84,10 +84,12 @@ for (const [raw, expected, label] of cases) {
 	const got = checkCommitSubject(filterCommitLines(raw))
 	const ok = got.pass
 	const mk = ok === expected ? 'PASS' : 'FAIL'
-	if (ok !== expected) failed += 1
+	if (ok !== expected) {
+		failed += 1
+	}
 	const detail = ok ? '' : `  [${got.kind}: ${got.hit}]`
 	console.log(
-		`${mk}  expect=${expected}  got=${ok}  :: ${label} :: ${JSON.stringify(raw)}` + detail,
+		`${mk}  expect=${expected}  got=${ok}  :: ${label} :: ${JSON.stringify(raw)}${detail}`,
 	)
 }
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`)

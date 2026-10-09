@@ -43,7 +43,9 @@ const skipCases = [
 let skipFailed = 0
 for (const [file, expected, label, alt] of skipCases) {
 	const got = alt === undefined ? isSkippedPath(file) : isSkippedPath(file, alt)
-	if (got !== expected) skipFailed += 1
+	if (got !== expected) {
+		skipFailed += 1
+	}
 	console.log(
 		`${got === expected ? 'PASS' : 'FAIL'}  expect=${expected}  got=${got}  :: skip :: ${label} :: ${file}`,
 	)
@@ -54,6 +56,10 @@ const cases = [
 	["+  cwd: 'D:\\Documents\\repo'", true, 'indented drive path'],
 	['+D:/ai/gh.exe', true, 'drive letter forward slash'],
 	['+C:\\Users\\me\\file', true, 'Users drive path'],
+	['+D:\\', false, 'bare drive root (no path content) - allowed'],
+	['+(D:\\)', false, 'punctuation-wrapped drive root - allowed'],
+	['+D:/', false, 'bare drive root forward slash - allowed'],
+	['+drive root D:\\ is refused', false, 'drive root in prose - allowed'],
 	["+  path: '<workspace>/code'", false, 'placeholder, not absolute'],
 	["+const RULES = 'scripts\\cmem-rules.mjs';", false, 'single backslash, no drive letter'],
 	["+const X = 'D:\\\\gh\\\\gh.exe';", false, 'double backslash escape (JS literal)'],
@@ -114,7 +120,9 @@ let failed = 0
 for (const [line, expected, label] of cases) {
 	const got = isOffendingAddedLine(line)
 	const mk = got === expected ? 'PASS' : 'FAIL'
-	if (got !== expected) failed += 1
+	if (got !== expected) {
+		failed += 1
+	}
 	console.log(`${mk}  expect=${expected}  got=${got}  :: ${label} :: ${line}`)
 }
 const total = failed + skipFailed

@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 
 const SHARED_END = '// ---- 共享片段结束 ----'
 const SHARED_REGIONS = {
-	constants: '// ---- 共享片段开始:常量 ----',
 	commitMsg: '// ---- 共享片段开始:commit-msg 判定 ----',
+	constants: '// ---- 共享片段开始:常量 ----',
 	preCommit: '// ---- 共享片段开始:pre-commit 判定 ----',
 }
 
@@ -16,13 +16,21 @@ const SHARED_REGIONS = {
 const snippetCache = new Map()
 export function readSharedSnippet(region: string): string {
 	const beginMark = SHARED_REGIONS[region]
-	if (!beginMark) throw new Error(`[hook-logic] unknown shared snippet region: ${region}`)
-	if (snippetCache.has(region)) return snippetCache.get(region)
+	if (!beginMark) {
+		throw new Error(`[hook-logic] unknown shared snippet region: ${region}`)
+	}
+	if (snippetCache.has(region)) {
+		return snippetCache.get(region)
+	}
 	const src = readFileSync(fileURLToPath(import.meta.url), 'utf8')
 	const begin = src.indexOf(`\n${beginMark}\n`)
-	if (begin === -1) throw new Error(`[hook-logic] marker not found at line start: ${beginMark}`)
+	if (begin === -1) {
+		throw new Error(`[hook-logic] marker not found at line start: ${beginMark}`)
+	}
 	const end = src.indexOf(`\n${SHARED_END}\n`, begin)
-	if (end === -1) throw new Error(`[hook-logic] end marker not found after: ${beginMark}`)
+	if (end === -1) {
+		throw new Error(`[hook-logic] end marker not found after: ${beginMark}`)
+	}
 	const start = begin + 1 + beginMark.length + 1
 	const snippet = src.slice(start, end).replace(/[\r\n]+$/, '')
 	snippetCache.set(region, snippet)
@@ -43,18 +51,30 @@ const GLOB_CHARS = new Set(['*', '?', '[', ']', '{', '}'])
 const TOKEN_SPLIT = /[\s'"`]+/
 function tokenHasGlobShape(token) {
 	for (let i = 0; i < token.length; i++) {
-		if (!GLOB_CHARS.has(token[i])) continue
+		if (!GLOB_CHARS.has(token[i])) {
+			continue
+		}
 		const prev = i > 0 ? token[i - 1] : ''
 		const next = i + 1 < token.length ? token[i + 1] : ''
-		if (GLOB_CHARS.has(prev) || prev === '/' || GLOB_CHARS.has(next) || next === '/') return true
+		if (GLOB_CHARS.has(prev) || prev === '/' || GLOB_CHARS.has(next) || next === '/') {
+			return true
+		}
 	}
 	return false
 }
 // 行内是否含真实绝对路径:逐 token 判定,glob 形状 token 直接跳过
 function hasAbsolutePath(line) {
 	for (const token of line.split(TOKEN_SPLIT)) {
-		if (token === '' || tokenHasGlobShape(token)) continue
-		if (ABS_PATH.test(token)) return true
+		if (token === '' || tokenHasGlobShape(token)) {
+			continue
+		}
+		// 纯盘根放行
+		if (/^[^A-Za-z]*[A-Za-z]:[\\/]?[^A-Za-z0-9_]*$/.test(token)) {
+			continue
+		}
+		if (ABS_PATH.test(token)) {
+			return true
+		}
 	}
 	return false
 }
@@ -76,17 +96,22 @@ function filterCommitLines(raw) {
 // 判定顺序:绝对路径 → fixup 目标 → Conventional 格式
 function checkCommitSubject(lines) {
 	const absHit = lines.find((line) => hasAbsolutePath(line))
-	if (absHit) return { pass: false, kind: 'abs', hit: absHit }
+	if (absHit) {
+		return { hit: absHit, kind: 'abs', pass: false }
+	}
 	const subject = lines[0] ?? ''
 	if (GIT_PREFIX.test(subject)) {
 		const m = subject.match(FIXUP_PREFIX)
 		const target = m ? subject.slice(m[0].length) : subject
-		if (CONVENTIONAL.test(target) || SHORT_HASH.test(target))
-			return { pass: true, kind: null, hit: '' }
-		return { pass: false, kind: 'target', hit: subject }
+		if (CONVENTIONAL.test(target) || SHORT_HASH.test(target)) {
+			return { hit: '', kind: null, pass: true }
+		}
+		return { hit: subject, kind: 'target', pass: false }
 	}
-	if (CONVENTIONAL.test(subject)) return { pass: true, kind: null, hit: '' }
-	return { pass: false, kind: 'format', hit: subject }
+	if (CONVENTIONAL.test(subject)) {
+		return { hit: '', kind: null, pass: true }
+	}
+	return { hit: subject, kind: 'format', pass: false }
 }
 // ---- 共享片段开始:pre-commit 判定 ----
 // 跳过 node_modules/.git/.githooks 与钩子脚本自身(verify 含绝对路径测试数据、install-hooks 内嵌 shebang,避免自匹配);
@@ -103,11 +128,17 @@ const SKIP_FILES = new Set([
 // 其内嵌的测试数据(UNC/绝对路径字面量)随即触发误报。
 function isSkippedPath(...files) {
 	for (const file of files) {
-		if (!file) continue
-		if (SKIP_FILES.has(file)) return true
+		if (!file) {
+			continue
+		}
+		if (SKIP_FILES.has(file)) {
+			return true
+		}
 		const slash = file.indexOf('/')
 		const top = slash === -1 ? file : file.slice(0, slash)
-		if (SKIP_DIRS.has(top)) return true
+		if (SKIP_DIRS.has(top)) {
+			return true
+		}
 	}
 	return false
 }
@@ -126,8 +157,9 @@ function isOffendingAddedLine(line) {
 // 区域外工具函数可补类型注解,由 tsconfig.scripts.json 校验
 function readHookTemplate(name: string, label: string): string {
 	const p = join(dirname(fileURLToPath(import.meta.url)), '..', '.githooks', name)
-	if (!existsSync(p))
+	if (!existsSync(p)) {
 		throw new Error(`[${label}] .githooks/${name} 不存在,请先运行: node scripts/install-hooks.ts`)
+	}
 	const raw = readFileSync(p, 'utf8')
 	const nl = raw.indexOf('\n')
 	return nl === -1 ? raw : raw.slice(nl + 1)

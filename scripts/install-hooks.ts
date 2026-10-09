@@ -23,26 +23,26 @@ const gitDir = join(repoRoot, '.git')
 mkdirSync(hooksDir, { recursive: true })
 
 // 仅 hooksPath 依赖 git;钩子生成在非 git 检出下也执行
-if (!existsSync(gitDir)) {
-	console.error(
-		'[install-hooks] not in a git repo (.git not found), skipping core.hooksPath setup.',
-	)
-} else {
+if (existsSync(gitDir)) {
 	try {
-		execSync('git config core.hooksPath .githooks', { stdio: 'ignore', cwd: repoRoot })
+		execSync('git config core.hooksPath .githooks', { cwd: repoRoot, stdio: 'ignore' })
 		console.log('[install-hooks] core.hooksPath set to .githooks')
 	} catch {
 		console.error(
 			'[install-hooks] could not set core.hooksPath, set it manually: git config core.hooksPath .githooks',
 		)
 	}
+} else {
+	console.error(
+		'[install-hooks] not in a git repo (.git not found), skipping core.hooksPath setup.',
+	)
 }
 
 // ---------------------------------------------------------------------------
 // 钩子模板:占位符 /*@HOOK_SHARED:<region>@*/ 由 hook-logic.ts 展开
 // 须用 String.raw 保留转义;内部字符串用 + 拼接,避免反引号/${} 干扰外层模板
 // ---------------------------------------------------------------------------
-const COMMIT_MSG_TEMPLATE = String.raw`// commit-msg 钩子(Node 版):
+const COMMIT_MSG_TEMPLATE = String.raw`
 // node 是原生 Windows 程序,经 #!<node路径> shebang 由 git 直接 CreateProcess,绕过 sh/env
 // (受限沙箱/受限 token 下 sh.exe 因 signal pipe 创建失败,Win32 error 5)
 // 校验 Conventional Commits 与 fixup 目标;拦截机器绝对路径
@@ -86,7 +86,7 @@ if (!verdict.pass) {
 }
 process.exit(0);
 `
-const PRE_COMMIT_TEMPLATE = String.raw`// pre-commit 钩子(Node 版):
+const PRE_COMMIT_TEMPLATE = String.raw`
 // sh.exe 依赖 signal pipe(cygwin fork),受限沙箱下创建失败;node 经 #!<node路径> shebang 由 git 直接 CreateProcess 绕过 sh/env
 // 钩子内调 git 避开 stdio pipe(受限环境 EPERM),改用文件句柄继承捕获输出
 // 扫描暂存内容中 ^+ 开头的行,拦截绝对路径
