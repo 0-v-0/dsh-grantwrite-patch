@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Auto-repairs the DSH Windows sandbox failure `Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite` and retries the original command — completely invisible to the model.
+Windows sandbox ACL-repair plugin for DeepSeek Harness (dsh) — fix the grantWrite failure (SetNamedSecurityInfoW Win32 5) and retry the command invisibly.
 
 ## What it solves
 

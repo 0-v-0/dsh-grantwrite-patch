@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-自动修复 DSH Windows 沙箱的 `Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite` 错误，并重试原命令。对模型完全无感。
+为 DeepSeek Harness (dsh) 开发的 Windows 沙箱 ACL 修复插件 —— 修复 grantWrite 失败（SetNamedSecurityInfoW Win32 5），并静默重试原命令。
 
 ## 它解决什么问题
 

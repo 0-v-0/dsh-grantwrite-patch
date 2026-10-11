@@ -1,10 +1,14 @@
 {
 	"name": "dsh-grantwrite-patch",
 	"version": "0.1.0",
-	"description": "Auto-repair the Windows sandbox ACL failure 'SetNamedSecurityInfoW failed (Win32 5): grantWrite' and retry the command invisibly. FFI patch by default (dsh-acl-sandbox-patch scheme) on DSH >= 0.1.7; the ACL-repair fallback additionally requires DSH >= 0.2.x (sandbox package assets) and fails closed otherwise.",
+	"description": "Windows sandbox ACL-repair plugin for DeepSeek Harness (dsh) — fix the grantWrite failure (SetNamedSecurityInfoW Win32 5) and retry the command invisibly",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/0-v-0/dsh-grantwrite-patch.git"
+	},
+	"homepage": "https://github.com/0-v-0/dsh-grantwrite-patch#readme",
+	"bugs": {
+		"url": "https://github.com/0-v-0/dsh-grantwrite-patch/issues"
 	},
 	"type": "module",
 	"engines": {
@@ -39,5 +43,12 @@
 			"patch": "./cordis.patch.yml"
 		}
 	},
+	"keywords": [
+		"dsh",
+		"dsh-plugin",
+		"deepseek-harness",
+		"windows-sandbox",
+		"acl"
+	],
 	"license": "MIT"
 }
