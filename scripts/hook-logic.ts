@@ -4,11 +4,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const SHARED_END = '// ---- 共享片段结束 ----'
+const SHARED_END = '// --- shared snippet end ---'
 const SHARED_REGIONS = {
-	commitMsg: '// ---- 共享片段开始:commit-msg 判定 ----',
-	constants: '// ---- 共享片段开始:常量 ----',
-	preCommit: '// ---- 共享片段开始:pre-commit 判定 ----',
+	commitMsg: '// --- shared snippet begin: commit-msg check ---',
+	constants: '// --- shared snippet begin: constants ---',
+	preCommit: '// --- shared snippet begin: pre-commit check ---',
 }
 
 // 取标记间源码(不含标记行);标记须在行首匹配避免误命中
@@ -37,7 +37,7 @@ export function readSharedSnippet(region: string): string {
 	return snippet
 }
 
-// ---- 共享片段开始:常量 ----
+// --- shared snippet begin: constants ---
 // 拦截绝对路径:
 //   - Windows 盘符:字母+冒号+单 \ 或 /,排除 X:\\ 转义、URL scheme、相对引用
 //   - POSIX 系统目录:/ + 白名单目录 + 可选一级名(≥1 字符,允许非 ASCII);单段(如 etc)也命中;
@@ -86,9 +86,9 @@ const GIT_PREFIX = /^(fixup|squash|amend)! /
 // 与 GIT_PREFIX 同集合,空白贪婪(\s+),用于取出 target
 const FIXUP_PREFIX = /^(fixup|squash|amend)!\s+/
 const SHORT_HASH = /^\s*[0-9a-f]{7,40}\s*$/
-// ---- 共享片段结束 ----
+// --- shared snippet end ---
 
-// ---- 共享片段开始:commit-msg 判定 ----
+// --- shared snippet begin: commit-msg check ---
 // 去掉 git 追加的 # 注释行与空行
 function filterCommitLines(raw) {
 	return raw.split(/\r?\n/).filter((line) => line.length > 0 && !line.startsWith('#'))
@@ -113,7 +113,7 @@ function checkCommitSubject(lines) {
 	}
 	return { hit: subject, kind: 'format', pass: false }
 }
-// ---- 共享片段开始:pre-commit 判定 ----
+// --- shared snippet begin: pre-commit check ---
 // 跳过 node_modules/.git/.githooks 与钩子脚本自身(verify 含绝对路径测试数据、install-hooks 内嵌 shebang,避免自匹配);
 // 目录按首段、文件按完整路径精确匹配,防 ../x 误跳
 const SKIP_DIRS = new Set(['node_modules', '.git', '.githooks', 'test'])
@@ -150,9 +150,9 @@ function isOffendingAddedLine(line) {
 		hasAbsolutePath(line)
 	)
 }
-// ---- 共享片段结束 ----
+// --- shared snippet end ---
 
-// ---- 非共享区:install/verify 共用工具(位于片段之外,不进 .githooks 嵌入正文) ----
+// --- 非共享区:install/verify 共用工具 ---
 // 共享片段区域整体嵌入 .githooks 钩子(纯 JS,不能用 TS 语法),区域内不得出现类型注解;
 // 区域外工具函数可补类型注解,由 tsconfig.scripts.json 校验
 function readHookTemplate(name: string, label: string): string {

@@ -26,7 +26,6 @@ mkdirSync(hooksDir, { recursive: true })
 if (existsSync(gitDir)) {
 	try {
 		execSync('git config core.hooksPath .githooks', { cwd: repoRoot, stdio: 'ignore' })
-		console.log('[install-hooks] core.hooksPath set to .githooks')
 	} catch {
 		console.error(
 			'[install-hooks] could not set core.hooksPath, set it manually: git config core.hooksPath .githooks',
@@ -38,10 +37,8 @@ if (existsSync(gitDir)) {
 	)
 }
 
-// ---------------------------------------------------------------------------
 // 钩子模板:占位符 /*@HOOK_SHARED:<region>@*/ 由 hook-logic.ts 展开
 // 须用 String.raw 保留转义;内部字符串用 + 拼接,避免反引号/${} 干扰外层模板
-// ---------------------------------------------------------------------------
 const COMMIT_MSG_TEMPLATE = String.raw`
 // node 是原生 Windows 程序,经 #!<node路径> shebang 由 git 直接 CreateProcess,绕过 sh/env
 // (受限沙箱/受限 token 下 sh.exe 因 signal pipe 创建失败,Win32 error 5)
@@ -176,12 +173,10 @@ if (exitCode !== 0) {
 	process.stderr.write("Replace them with project-relative paths (./) or home placeholders (~).\n");
 	process.exit(1);
 }
-// ---------------------------------------------------------------------------
 // 阶段 2:oxlint 检查暂存源码(轻量配置 .oxlintrc.staged.json,typeAware=false,
 // 避免全量类型程序图开销;仅 lint 新提交的源码文件,成功静默)
 // 显式传文件列表而非 --staged:扩展名过滤在钩子内完成,oxlint 再应用配置 ignorePatterns
 // (ignorePatterns 继承自主配置 .oxlintrc.json,已排除 *.js/*.mjs/*.cjs/*.config.ts、lib/dist/docs/profiles/.dsh-smoke)
-// ---------------------------------------------------------------------------
 const OXLINT_BIN = path.join(process.cwd(), "node_modules", "oxlint", "bin", "oxlint");
 const OXLINT_CONFIG = path.join(process.cwd(), ".oxlintrc.staged.json");
 const LINT_EXT = /\.(?:ts|mts|cts|tsx|jsx|vue)$/;
@@ -228,15 +223,14 @@ function expandTemplate(tpl, name) {
 	})
 }
 
-// 写入生成物并赋可执行位(Unix);reason 为日志尾串
-function writeGeneratedHook(outPath, expected, reason) {
+// 写入生成物并赋可执行位(Unix);成功静默
+function writeGeneratedHook(outPath, expected) {
 	writeFileSync(outPath, expected)
 	try {
 		chmodSync(outPath, 0o755)
 	} catch {
 		// Windows 上 chmod 无效,忽略
 	}
-	console.log(`[install-hooks] ${reason}`)
 }
 
 // 内容感知再生成:正文一致仅 shebang 过期则重写,正文不同按模板重写
@@ -254,34 +248,20 @@ for (const [name, tpl] of HOOK_CONFIGS) {
 	const outPath = join(hooksDir, name)
 	const body = expandTemplate(tpl, name)
 	const expectedContent = `${shebang}\n${body}`
-	if (!existsSync(outPath)) {
-		writeGeneratedHook(outPath, expectedContent, `generated .githooks/${name}`)
-		continue
+	if (existsSync(outPath)) {
+		const existing = readFileSync(outPath, 'utf8')
+		const nl = existing.indexOf('\n')
+		const existingFirstLine = nl === -1 ? existing : existing.slice(0, nl)
+		const existingBody = nl === -1 ? '' : existing.slice(nl + 1)
+		// 正文与 shebang 均一致即视为最新;否则按模板重写
+		if (existingBody === body && existingFirstLine === shebang) continue
 	}
-	const existing = readFileSync(outPath, 'utf8')
-	const nl = existing.indexOf('\n')
-	const existingFirstLine = nl === -1 ? existing : existing.slice(0, nl)
-	const existingBody = nl === -1 ? '' : existing.slice(nl + 1)
-	if (existingBody === body) {
-		if (existingFirstLine === shebang) {
-			console.log(`[install-hooks] .githooks/${name} already up to date`)
-		} else {
-			writeGeneratedHook(outPath, expectedContent, `regenerated .githooks/${name}`)
-		}
-	} else {
-		writeGeneratedHook(
-			outPath,
-			expectedContent,
-			`regenerated .githooks/${name} (content differs from template)`,
-		)
-	}
+	writeGeneratedHook(outPath, expectedContent)
 }
 
 const expectedFiles = ['pre-commit', 'commit-msg']
 const missing = expectedFiles.filter((base) => !existsSync(join(hooksDir, base)))
-if (missing.length === 0) {
-	console.log('[install-hooks] git hooks installed successfully.')
-} else {
+if (missing.length > 0) {
 	console.error(`[install-hooks] git hooks NOT installed, missing: ${missing.join(', ')}`)
 	process.exit(1)
 }
