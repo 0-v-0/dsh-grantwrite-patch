@@ -1,36 +1,38 @@
 # dsh-grantwrite-patch
 
-自动修复 DSH Windows 沙箱的 `Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite` 错误，并重试原命令。对模型完全无感。
+English | [中文](README.zh.md)
 
-## 它解决什么问题
+Auto-repairs the DSH Windows sandbox failure `Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite` and retries the original command — completely invisible to the model.
 
-Windows 上 `workspace-write` 沙箱在执行命令前要往工作区根目录 DACL 写写入授权（`AclWriteGrant.add` → `grantWrite`）。当链上某个目录缺有效 `WRITE_DAC`/`WRITE_OWNER` 时，`SetNamedSecurityInfoW` 以 Win32 5（ERROR_ACCESS_DENIED）失败，该工作区**所有**受限命令都在 spawn 前报错：
+## What it solves
+
+On Windows, the `workspace-write` sandbox writes a write grant into the workspace root DACL before every command (`AclWriteGrant.add` → `grantWrite`). When any directory on the chain lacks an effective `WRITE_DAC`/`WRITE_OWNER`, `SetNamedSecurityInfoW` fails with Win32 5 (ERROR_ACCESS_DENIED), and **every** confined command on that workspace fails before spawn:
 
 ```
 Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite
 ```
 
-本插件拦截这个错误，自动修复权限后重试命令，让你无感继续工作。
+This plugin intercepts that error, repairs permissions automatically, and retries the command so you keep working without noticing.
 
-## 工作方式
+## How it works
 
-插件按工作区大小自动选择策略：
+The plugin picks a strategy from the workspace size:
 
-- **普通工作区**：在内存层拦截错误，零副作用地重试，不改任何文件权限。
-- **大工作区**：探测到对象过多时（默认超过 2 万），主动给工作区补一次完整权限——这样不用每次都重复授权，省下大目录的等待时间。
-- **兜底**：上面的方法失效时，跑诊断脚本修一次权限再重试；脚本不可用时退回 `icacls` 授权。
+- **Normal workspaces**: intercept the error in memory and retry with zero side effects — no file permissions are touched.
+- **Large workspaces**: when the object count exceeds the threshold (20,000 by default), proactively apply a full grant to the workspace once, so the write grant is not re-paid on every DSH restart and large trees stop costing you waiting time.
+- **Fallback**: when the above cannot apply, run the diagnose script once to repair permissions and retry; when the script is unavailable, fall back to an `icacls` grant.
 
-三种方式互不冲突，按需叠加。
+The three paths never conflict; they stack on demand.
 
-## 运行要求
+## Requirements
 
-| 项 | 要求 |
+| Item | Requirement |
 |---|---|
-| 操作系统 | Windows（NTFS）。其他平台插件自动不启用 |
-| DSH 版本 | `>= 0.1.7-rc.1`。完整诊断脚本修复需 `>= 0.2.0-rc.2` |
-| 适用沙箱 | 仅 `workspace-write` 需要（`read-only` / `danger-full-access` 不需要） |
+| OS | Windows (NTFS). The plugin disables itself on other platforms |
+| DSH version | `>= 0.1.7-rc.1`. The full diagnose-script repair needs `>= 0.2.0-rc.2` |
+| Sandbox policy | Only `workspace-write` needs this (`read-only` / `danger-full-access` do not) |
 
-## 安装
+## Install
 
 ```sh
 pnpm install
@@ -38,12 +40,12 @@ pnpm build
 ```
 
 ```sh
-dsh plugin --profile web add <本仓库路径>
+dsh plugin --profile web add <path-to-this-repo>
 ```
 
-重启宿主后生效。或手动把 `cordis.patch.yml` 的 `- insert:` 段并入宿主 `cordis.yml`。
+Restart the host to take effect. Alternatively, merge the `- insert:` block of `cordis.patch.yml` into the host's `cordis.yml` by hand.
 
-## 配置
+## Configuration
 
 ```yaml
 - insert:
@@ -52,31 +54,29 @@ dsh plugin --profile web add <本仓库路径>
     config:
       enable: true
       mode: auto            # auto | patch | repair
-      objectThreshold: 20000    # 对象数达到此值视为大工作区，触发持久修复
-      probeTimeoutMs: 10000     # 大小探测超时；超时按大工作区处理
-      probeCooldownMs: 3600000  # 每工作区探测判定缓存时长
+      objectThreshold: 20000    # object count at/above which a workspace counts as large -> persistent repair
+      probeTimeoutMs: 10000     # size-probe timeout; a timed-out probe counts as large
+      probeCooldownMs: 3600000  # per-workspace probe/decision cache duration
       repairTimeoutMs: 120000
       maxRetries: 1
       cooldownMs: 60000
       appendDiagnostics: true
-      grantFallback: true      # 诊断脚本不可用(0.1.7)/失败时回退裸 icacls grant；磁盘根拒绝
-      # scriptPath: <绝对路径>   # 默认: 从 @deepseek-ai/dsh-sandbox-windows-acl 包 assets 解析 (DSH >= 0.2.x)
-      # outDir: <绝对路径>       # 默认: $DSH_HOME/grantwrite-patch（无 DSH_HOME 时 ~/.dsh/grantwrite-patch）
+      grantFallback: true      # fall back to a bare icacls grant when the diagnose script is unavailable (0.1.7) or fails; drive roots refused
+      # scriptPath: <absolute path>   # default: resolved from @deepseek-ai/dsh-sandbox-windows-acl package assets (DSH >= 0.2.x)
+      # outDir: <absolute path>       # default: $DSH_HOME/grantwrite-patch (~/.dsh/grantwrite-patch without DSH_HOME)
 ```
 
-## 安全模型
+## Security model
 
-- **patch 路径**：不改任何系统 ACL、无持久副作用；保留 `WRITE_RESTRICTED` 受限令牌、capability SID Allow ACE、world SID `FILE_DELETE_CHILD` Deny。失去的仅是 Low 完整性标签这一层纵深（子进程 Medium），且仅在本来打不上标签的环境发生。
-- **repair 路径**：修复范围由脚本的 `-AllowRoot` 硬边界约束：只改目标目录或严格在其内部的对象；reparse 点与托管应用树拒绝；deny ACE 永不删除；每次改动先备份、后重读验证，失败回滚本批改动。
-- **grant 回退**（`grantFallback`）：脚本不可用或失败时跑裸 `icacls <root> /grant "<user>:(OI)(CI)F`。**磁盘根硬拒**（`isDriveRoot`：`D:\` 等盘根拒绝，只授权真实工作区）；不碰继承策略、不删 deny ACE；可 `icacls <root> /remove:g "<user>"` 回滚。脚本优先（更安全：有 `-AllowRoot` 边界+备份+验证），回退仅兜底。
-- 插件进程是宿主进程（非受限 token），脚本修改权限正是沙箱受限 token 做不了的事；插件不提升 token。
-- 只匹配 `grantWrite` 上下文的 `SetNamedSecurityInfoW` 失败，其他 Win32 失败、命令退出码、EPERM 等一律原样放行。
-- 重试只发生一次（`maxRetries` 可调 0–3），修复失败不重试，防止循环。
+- **patch path**: touches no system ACL and leaves no persistent side effect; the `WRITE_RESTRICTED` restricted token, capability-SID Allow ACEs, and the world-SID `FILE_DELETE_CHILD` Deny are preserved. The only thing lost is the Low-integrity label layer of defence in depth (children run at Medium), and only on hosts that could not apply the label in the first place.
+- **repair path**: the repair scope is bounded by the script's `-AllowRoot`: only the target directory or objects strictly inside it are modified; reparse points and managed-application trees are refused; deny ACEs are never deleted; every change is backed up first and re-read for verification, and a failed batch is rolled back.
+- **grant fallback** (`grantFallback`): when the script is unavailable or fails, run a bare `icacls <root> /grant "<user>:(OI)(CI)F"`. **Drive roots are hard-refused** (`isDriveRoot`: `D:\` and other drive roots are refused; only real workspaces are granted); inheritance policy is untouched and deny ACEs are not removed; roll back with `icacls <root> /remove:g "<user>"`. The script is preferred (safer: `-AllowRoot` bound + backup + verify); the fallback only covers the gap.
+- The plugin process is the host process (a non-restricted token); modifying permissions is exactly what the sandbox's restricted token cannot do. The plugin never elevates its token.
+- Only `SetNamedSecurityInfoW` failures in a `grantWrite` context are matched; other Win32 failures, command exit codes, EPERM, and so on all pass through untouched.
+- The retry happens once (`maxRetries` is tunable from 0 to 3); a failed repair is not retried, which prevents loops.
 
-## 许可证
+## Credits & License
 
-## 致谢与许可证
-
-FFI patch 核心改编自 [masknull/dsh-acl-sandbox-patch](https://github.com/masknull/dsh-acl-sandbox-patch)
+The FFI patch core is adapted from [masknull/dsh-acl-sandbox-patch](https://github.com/masknull/dsh-acl-sandbox-patch).
 
 [MIT](LICENSE)
