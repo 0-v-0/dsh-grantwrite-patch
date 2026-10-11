@@ -64,10 +64,7 @@
 		// same region, so keep units small enough to be owned by one change.
 		// Warn-only nudges toward splitting, not CI gates.
 		"max-lines": ["warn", { "max": 400, "skipBlankLines": true, "skipComments": true }],
-		"max-lines-per-function": [
-			"warn",
-			{ "max": 80, "skipBlankLines": true, "skipComments": true }
-		],
+		"max-lines-per-function": ["warn", { "max": 80, "skipBlankLines": true, "skipComments": true }],
 		"max-depth": ["warn", { "max": 4 }],
 		"max-params": ["warn", { "max": 5 }],
 		"complexity": ["warn", { "max": 15 }],

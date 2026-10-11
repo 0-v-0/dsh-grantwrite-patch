@@ -2,33 +2,40 @@
 	"name": "dsh-grantwrite-patch",
 	"version": "0.1.0",
 	"description": "Windows sandbox ACL-repair plugin for DeepSeek Harness (dsh) — fix the grantWrite failure (SetNamedSecurityInfoW Win32 5) and retry the command invisibly",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/0-v-0/dsh-grantwrite-patch.git"
-	},
+	"keywords": [
+		"acl",
+		"deepseek-harness",
+		"dsh",
+		"dsh-plugin",
+		"windows-sandbox"
+	],
 	"homepage": "https://github.com/0-v-0/dsh-grantwrite-patch#readme",
 	"bugs": {
 		"url": "https://github.com/0-v-0/dsh-grantwrite-patch/issues"
 	},
-	"type": "module",
-	"engines": {
-		"node": ">=22.18",
-		"dsh": ">=0.1.7-rc.1"
+	"license": "MIT",
+	"author": "0-v-0 <kduice@qq.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/0-v-0/dsh-grantwrite-patch.git"
 	},
+	"files": [
+		"lib",
+		"cordis.patch.yml",
+		"README.zh.md"
+	],
+	"type": "module",
 	"main": "lib/index.js",
 	"exports": {
 		".": "./lib/index.js",
 		"./preload": "./lib/preload.cjs",
 		"./package.json": "./package.json"
 	},
-	"files": [
-		"lib",
-		"cordis.patch.yml"
-	],
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
 		"lint": "oxlint",
-		"pretest": "pnpm run build",
+		"pretest": "pnpm build",
+		"prepublishOnly": "pnpm test",
 		"test": "node test/apply.test.ts && node test/index.test.ts && node test/strategy.test.ts && node test/size-probe.test.ts",
 		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json"
 	},
@@ -38,17 +45,13 @@
 		"oxlint-tsgolint": "^7.0.2003",
 		"typescript": "^7.0.2"
 	},
+	"engines": {
+		"dsh": ">=0.1.7-rc.1",
+		"node": ">=22.18"
+	},
 	"dsh": {
 		"bundle": {
 			"patch": "./cordis.patch.yml"
 		}
-	},
-	"keywords": [
-		"dsh",
-		"dsh-plugin",
-		"deepseek-harness",
-		"windows-sandbox",
-		"acl"
-	],
-	"license": "MIT"
+	}
 }

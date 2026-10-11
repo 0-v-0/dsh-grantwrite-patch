@@ -34,16 +34,27 @@ The three paths never conflict; they stack on demand.
 
 ## Install
 
-```sh
-pnpm install
-pnpm build
-```
+### From npm
 
 ```sh
-dsh plugin --profile web add <path-to-this-repo>
+dsh plugin --profile web add dsh-grantwrite-patch
 ```
 
-Restart the host to take effect. Alternatively, merge the `- insert:` block of `cordis.patch.yml` into the host's `cordis.yml` by hand.
+### From source (GitHub)
+
+```sh
+git clone https://github.com/0-v-0/dsh-grantwrite-patch
+cd dsh-grantwrite-patch
+pnpm install && pnpm build
+dsh plugin --profile web add .
+```
+
+Notes:
+
+- `dsh plugin` behaves like adding a dependency to your profile. A bundle plugin is loaded once its full package name appears in the profile's `dsh.profile.bundles` list (added automatically); the bundle patch (`cordis.patch.yml`) applies on the next boot.
+- The source install must run `pnpm build` first: `lib/` is not committed, and the FFI preload is resolved from the installed package (`lib/preload.cjs`).
+- To update, run the same command again (`add dsh-grantwrite-patch@latest`).
+- Alternatively, merge the `- insert:` block of `cordis.patch.yml` into the host's `cordis.yml` by hand.
 
 ## Configuration
 

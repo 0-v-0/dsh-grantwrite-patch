@@ -34,16 +34,27 @@ Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite
 
 ## 安装
 
-```sh
-pnpm install
-pnpm build
-```
+### 从 npm 安装
 
 ```sh
-dsh plugin --profile web add <本仓库路径>
+dsh plugin --profile web add dsh-grantwrite-patch
 ```
 
-重启宿主后生效。或手动把 `cordis.patch.yml` 的 `- insert:` 段并入宿主 `cordis.yml`。
+### 从源码安装（GitHub）
+
+```sh
+git clone https://github.com/0-v-0/dsh-grantwrite-patch
+cd dsh-grantwrite-patch
+pnpm install && pnpm build
+dsh plugin --profile web add .
+```
+
+说明：
+
+- `dsh plugin` 等同于向 profile 添加依赖。bundle 插件的完整包名出现在 profile 的 `dsh.profile.bundles` 列表后即被加载（自动添加）；bundle 补丁（`cordis.patch.yml`）在下一次启动时生效。
+- 源码安装必须先跑 `pnpm build`：`lib/` 不入库，且 FFI preload 是从已安装包内解析的（`lib/preload.cjs`）。
+- 更新时重新执行相同命令即可（`add dsh-grantwrite-patch@latest`）。
+- 也可以手动把 `cordis.patch.yml` 的 `- insert:` 段并入宿主 `cordis.yml`。
 
 ## 配置
 
