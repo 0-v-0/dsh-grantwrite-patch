@@ -251,7 +251,7 @@
 	"ignorePatterns": [
 		"**/lib/**",
 		"**/node_modules/**",
-		"**/.dsh-smoke/**",
+		"**/.dsh-tmp/**",
 		"**/dist/**",
 		"**/docs/**",
 		"**/profiles/**",

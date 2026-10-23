@@ -192,7 +192,7 @@ if (exitCode !== 0) {
 // 阶段 2:oxlint 检查暂存源码(轻量配置 .oxlintrc.staged.json,typeAware=false,
 // 避免全量类型程序图开销;仅 lint 新提交的源码文件,成功静默)
 // 显式传文件列表而非 --staged:扩展名过滤在钩子内完成,oxlint 再应用配置 ignorePatterns
-// (ignorePatterns 由 .oxlintrc.staged.json 自己声明:*.js/*.mjs/*.cjs/*.config.ts、lib/node_modules/.dsh-smoke/dist/docs;父配置另含 **/profiles/**)
+// (ignorePatterns 由 .oxlintrc.staged.json 自己声明:*.js/*.mjs/*.cjs/*.config.ts、lib/node_modules/.dsh-tmp/dist/docs;父配置另含 **/profiles/**)
 const OXLINT_BIN = path.join(process.cwd(), "node_modules", "oxlint", "bin", "oxlint");
 const OXLINT_CONFIG = path.join(process.cwd(), ".oxlintrc.staged.json");
 const LINT_EXT = /\.(?:ts|mts|cts|tsx|jsx|vue)$/;
