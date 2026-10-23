@@ -1,6 +1,6 @@
 {
 	"name": "dsh-grantwrite-patch",
-	"version": "0.1.0",
+	"version": "0.3.0",
 	"description": "Windows sandbox ACL-repair plugin for DeepSeek Harness (dsh) — fix the grantWrite failure (SetNamedSecurityInfoW Win32 5) and retry the command invisibly",
 	"keywords": [
 		"acl",

@@ -68,10 +68,12 @@ test('resolveConfig defaults: sandbox-package script (empty in test env), DSH_HO
 	assert.ok(opts.outDir.includes('grantwrite-patch'))
 	assert.equal(opts.maxRetries, 1)
 	assert.equal(opts.repairTimeoutMs, 120000)
-	const over = resolveConfig({ maxRetries: 2, outDir: 'O', scriptPath: 'S' })
+	assert.equal(opts.deepScan, true)
+	const over = resolveConfig({ deepScan: false, maxRetries: 2, outDir: 'O', scriptPath: 'S' })
 	assert.equal(over.scriptPath, 'S')
 	assert.equal(over.outDir, 'O')
 	assert.equal(over.maxRetries, 2)
+	assert.equal(over.deepScan, false)
 })
 
 test('resolveDshHome honors DSH_HOME and falls back to ~/.dsh', () => {

@@ -53,3 +53,10 @@
         # Drive roots (D:\) are refused. Roll back with
         # `icacls <root> /remove:g "<user>". Default true.
         grantFallback: true
+        # Background full-tree capability back-fill: after the shallow
+        # root-level pass, walk the whole tree (icacls <root> /T, async) and
+        # back-fill hardened subdirs at any depth — node_modules/.git internals
+        # included (the fix-delete-acl.ts --all equivalent). Fire-and-forget,
+        # never on the command path; one run per workspace per probeCooldownMs.
+        # Default true.
+        deepScan: true

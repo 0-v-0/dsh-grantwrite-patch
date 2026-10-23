@@ -101,9 +101,9 @@ function resolveDshHome() {
 	const expanded =
 		base === '~'
 			? os.homedir()
-			: base.startsWith('~/') || base.startsWith('~\\')
+			: (base.startsWith('~/') || base.startsWith('~\\')
 				? path.join(os.homedir(), base.slice(2))
-				: base
+				: base)
 	return path.resolve(expanded)
 }
 

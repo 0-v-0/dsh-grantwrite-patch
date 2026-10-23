@@ -21,6 +21,8 @@ Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite
 - **普通工作区**：在内存层拦截错误，零副作用地重试，不改任何文件权限。
 - **大工作区**：探测到对象过多时（默认超过 2 万），主动给工作区补一次完整权限——这样不用每次都重复授权，省下大目录的等待时间。
 - **兜底**：上面的方法失效时，跑诊断脚本修一次权限再重试；脚本不可用时退回 `icacls` 授权。
+- **capability 补授**（v0.2.0+）：每次进入工作区时，把根目录的 capability SID（写 SID）显式补授到"授权后出现/已存在"的硬化子目录（有 world Deny `FILE_DELETE_CHILD` 但缺 capability Allow）——修复 dsh 上游 [Discussion #423](https://github.com/deepseek-ai/deepseek-harness/discussions/423)/[#9559](https://github.com/deepseek-ai/deepseek-harness/discussions/9559) 描述的"预存在子目录无法写/删"问题。与 Low label 无关（那是 DACL 产物），严格环境下同样运行；幂等 + 冷却，只在真正缺 ACE 的目录上动手，不碰 deny ACE、不扩大授权（只复用根已有的 capability SID，Set-Acl 直构 SID，icacls 映射不了 S-1-4-*）。
+- **后台深层补授**（v0.3.0+）：浅层根一级补授后，插件在后台全树扫描（`icacls <root> /T`，异步）并补授**任意深度**的硬化子目录——含 node_modules/.git 内部——等效于手动跑 `fix-delete-acl.ts --all`，不再需要任何手动 ACL 脚本。fire-and-forget、绝不阻塞命令路径；每个工作区按 `probeCooldownMs` 只跑一次；`deepScan` 开关（默认 `true`）。
 
 三种方式互不冲突，按需叠加。
 
@@ -73,6 +75,7 @@ dsh plugin --profile web add .
       cooldownMs: 60000
       appendDiagnostics: true
       grantFallback: true      # 诊断脚本不可用(0.1.7)/失败时回退裸 icacls grant；磁盘根拒绝
+      deepScan: true           # 后台全树 capability 补授（fix-delete-acl.ts --all 等效）
       # scriptPath: <绝对路径>   # 默认: 从 @deepseek-ai/dsh-sandbox-windows-acl 包 assets 解析 (DSH >= 0.2.x)
       # outDir: <绝对路径>       # 默认: $DSH_HOME/grantwrite-patch（无 DSH_HOME 时 ~/.dsh/grantwrite-patch）
 ```
@@ -82,6 +85,7 @@ dsh plugin --profile web add .
 - **patch 路径**：不改任何系统 ACL、无持久副作用；保留 `WRITE_RESTRICTED` 受限令牌、capability SID Allow ACE、world SID `FILE_DELETE_CHILD` Deny。失去的仅是 Low 完整性标签这一层纵深（子进程 Medium），且仅在本来打不上标签的环境发生。
 - **repair 路径**：修复范围由脚本的 `-AllowRoot` 硬边界约束：只改目标目录或严格在其内部的对象；reparse 点与托管应用树拒绝；deny ACE 永不删除；每次改动先备份、后重读验证，失败回滚本批改动。
 - **grant 回退**（`grantFallback`）：脚本不可用或失败时跑裸 `icacls <root> /grant "<user>:(OI)(CI)F`。**磁盘根硬拒**（`isDriveRoot`：`D:\` 等盘根拒绝，只授权真实工作区）；不碰继承策略、不删 deny ACE；可 `icacls <root> /remove:g "<user>"` 回滚。脚本优先（更安全：有 `-AllowRoot` 边界+备份+验证），回退仅兜底。
+- **深层补授**（`deepScan`）：与浅层同一 capability-SID Allow，只是任意深度；每个命中目录补授前先复查（已修过的跳过），保持幂等、不扩大授权。`/T` 扫描在后台，不会卡住命令路径；超时扫描会报告、下个窗口重试。
 - 插件进程是宿主进程（非受限 token），脚本修改权限正是沙箱受限 token 做不了的事；插件不提升 token。
 - 只匹配 `grantWrite` 上下文的 `SetNamedSecurityInfoW` 失败，其他 Win32 失败、命令退出码、EPERM 等一律原样放行。
 - 重试只发生一次（`maxRetries` 可调 0–3），修复失败不重试，防止循环。

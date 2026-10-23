@@ -18,6 +18,9 @@ function wait(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms))
 }
 
+/** Stub the background deep scan: no real icacls /T spawns in tests. */
+const deepStub = async () => ({ fixed: [], skipped: 0 })
+
 test('resolveConfig defaults: mode auto, threshold 20000, probe windows', () => {
 	const opts = resolveConfig({})
 	assert.equal(opts.mode, 'auto')
@@ -42,6 +45,7 @@ test('decideWorkspace: strict label -> no probe, no repair', async () => {
 	let probes = 0
 	let repairs = 0
 	await decideWorkspace('R', opts, state, {
+		deepRunner: deepStub,
 		labelProbe: () => true,
 		probe: async () => {
 			probes += 1
@@ -70,17 +74,17 @@ test('decideWorkspace: degraded large workspace -> proactive repair, cached', as
 		return { large: true, objects: opts.objectThreshold }
 	}
 
-	await decideWorkspace('R', opts, state, { labelProbe: () => false, probe, runner })
+	await decideWorkspace('R', opts, state, { deepRunner: deepStub, labelProbe: () => false, probe, runner })
 	assert.equal(probes, 1)
 	assert.equal(repairs, 1)
 
 	// Within cooldown: no second probe, no second repair.
-	await decideWorkspace('R', opts, state, { labelProbe: () => false, probe, runner })
+	await decideWorkspace('R', opts, state, { deepRunner: deepStub, labelProbe: () => false, probe, runner })
 	assert.equal(probes, 1)
 	assert.equal(repairs, 1)
 
 	// Different root is not cached.
-	await decideWorkspace('R2', opts, state, { labelProbe: () => false, probe, runner })
+	await decideWorkspace('R2', opts, state, { deepRunner: deepStub, labelProbe: () => false, probe, runner })
 	assert.equal(probes, 2)
 	assert.equal(repairs, 2)
 })
@@ -90,6 +94,7 @@ test('decideWorkspace: small workspace -> no repair', async () => {
 	const state = makeRecoveryState()
 	let repairs = 0
 	await decideWorkspace('R', opts, state, {
+		deepRunner: deepStub,
 		labelProbe: () => false,
 		probe: async () => ({ large: false, objects: 3 }),
 		runner: async () => {
@@ -104,6 +109,9 @@ test('decideWorkspace: failing probe/repair never throws', async () => {
 	const opts = resolveConfig({})
 	const state = makeRecoveryState()
 	await decideWorkspace('R', opts, state, {
+		deepRunner: async () => {
+			throw new Error('deep boom')
+		},
 		labelProbe: () => {
 			throw new Error('label boom')
 		},
@@ -130,11 +138,41 @@ test('decideWorkspace: cooldown expiry re-decides', async () => {
 		repairs += 1
 		return { ok: true }
 	}
-	await decideWorkspace('R', opts, state, { labelProbe: () => false, probe, runner })
+	await decideWorkspace('R', opts, state, { deepRunner: deepStub, labelProbe: () => false, probe, runner })
 	await wait(10)
-	await decideWorkspace('R', opts, state, { labelProbe: () => false, probe, runner })
+	await decideWorkspace('R', opts, state, { deepRunner: deepStub, labelProbe: () => false, probe, runner })
 	assert.equal(probes, 2)
 	assert.equal(repairs, 0)
+})
+
+test('decideWorkspace: background deep scan runs once per cooldown, fire-and-forget', async () => {
+	const opts = resolveConfig({ probeCooldownMs: 60000 })
+	const state = makeRecoveryState()
+	let deepCalls = 0
+	const deepRunner = async () => {
+		deepCalls += 1
+		await wait(5)
+		return { fixed: ['ws/node_modules/pkg'], skipped: 0 }
+	}
+	const base = { deepRunner, labelProbe: () => false, probe: async () => ({ large: false, objects: 1 }), runner: async () => ({ ok: true }) }
+	// First decision schedules the background scan (not awaited by design).
+	await decideWorkspace('R', opts, state, base)
+	// Second decision inside the cooldown: no new schedule.
+	await decideWorkspace('R', opts, state, base)
+	await wait(20)
+	assert.equal(deepCalls, 1)
+	// deepScan: false disables it entirely.
+	const offState = makeRecoveryState()
+	let offCalls = 0
+	await decideWorkspace('R', resolveConfig({ deepScan: false }), offState, {
+		...base,
+		deepRunner: async () => {
+			offCalls += 1
+			return { fixed: [], skipped: 0 }
+		},
+	})
+	await wait(5)
+	assert.equal(offCalls, 0)
 })
 
 test('pickPreloadPath returns a preload path; build ships preload.cjs next to index.js', () => {

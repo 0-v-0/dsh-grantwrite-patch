@@ -41,6 +41,7 @@ import type {
 } from './types.ts'
 import { installPatch, loadPreload } from './patch.ts'
 import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
+import { repairCapabilityTree, repairCapabilityTreeDeep, type CapabilityRepairOutcome } from './capability-repair.ts'
 
 export const name = 'dsh-grantwrite-patch'
 export const inject = { shell: null } // optional: no shell composition -> inert
@@ -144,6 +145,7 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 	return {
 		appendDiagnostics: true,
 		cooldownMs: 60000,
+		deepScan: true,
 		enable: true,
 		grantFallback: true,
 		maxRetries: 1,
@@ -357,10 +359,23 @@ export interface RecoveryState {
 	lastRepair: Map<string, number>
 	// Last probe/decision timestamp per root; avoids re-probing every command.
 	decided: Map<string, number>
+	// Last capability-SID backfill timestamp per root; avoids rescanning every command.
+	capabilityRepaired: Map<string, number>
+	// Last background deep-scan timestamp per root (probeCooldownMs window).
+	deepScanned: Map<string, number>
+	// One in-flight background deep scan per root; concurrent calls share it.
+	deepInFlight: Map<string, Promise<void>>
 }
 
 export function makeRecoveryState(): RecoveryState {
-	return { decided: new Map(), inflight: new Map(), lastRepair: new Map() }
+	return {
+		capabilityRepaired: new Map(),
+		decided: new Map(),
+		deepInFlight: new Map(),
+		deepScanned: new Map(),
+		inflight: new Map(),
+		lastRepair: new Map(),
+	}
 }
 
 /**
@@ -404,6 +419,9 @@ export interface ApplyDeps {
 	runner?: RepairRunner
 	probe?: SizeProbe
 	labelProbe?: LabelProbe
+	/** Background full-tree capability back-fill; tests stub this to avoid
+	 * real icacls /T spawns. Defaults to repairCapabilityTreeDeep. */
+	deepRunner?: (root: string, opts: { timeoutMs?: number }) => Promise<CapabilityRepairOutcome>
 }
 
 /**
@@ -426,6 +444,55 @@ export async function decideWorkspace(
 	const last = state.decided.get(root)
 	if (last !== undefined && now - last < opts.probeCooldownMs) {
 		return
+	}
+
+	// Capability-SID backfill for pre-existing hardened subdirs (dsh #423/#9559).
+	// The delete/write deny is a DACL artifact (world Deny FILE_DELETE_CHILD),
+	// unrelated to the Low label — so it must run even in a strict environment
+	// where grantWrite succeeds with the label. Own cooldown; never throws.
+	try {
+		const lastCap = state.capabilityRepaired.get(root)
+		if (lastCap === undefined || now - lastCap >= opts.probeCooldownMs) {
+			repairCapabilityTree(root, { timeoutMs: opts.repairTimeoutMs })
+			state.capabilityRepaired.set(root, Date.now())
+		}
+	} catch {
+		// best-effort: the FFI patch still carries the command either way
+	}
+
+	// Background deep scan (fix-delete-acl.ts --all equivalent): walk the whole
+	// tree with icacls /T (async) and back-fill hardened subdirs at any depth —
+	// node_modules/.git internals included. Fire-and-forget so the command path
+	// is never blocked by the /T walk; one run per root per probeCooldownMs.
+	if (opts.deepScan) {
+		const lastDeep = state.deepScanned.get(root)
+		if (
+			!state.deepInFlight.has(root) &&
+			(lastDeep === undefined || now - lastDeep >= opts.probeCooldownMs)
+		) {
+			const deep = (hooks.deepRunner ?? repairCapabilityTreeDeep)(root, {
+				timeoutMs: opts.repairTimeoutMs,
+			})
+				.then((outcome) => {
+					state.deepScanned.set(root, Date.now())
+					if (outcome.error) {
+						console.warn(
+							`[dsh-grantwrite-patch] deep capability backfill ${root} failed: ${outcome.error}`,
+						)
+					} else if (outcome.fixed.length > 0) {
+						console.log(
+							`[dsh-grantwrite-patch] deep capability backfill ${root}: fixed ${outcome.fixed.length} dir(s), skipped ${outcome.skipped}`,
+						)
+					}
+				})
+				.catch(() => {
+					// best-effort: never let the background scan surface
+				})
+				.finally(() => {
+					state.deepInFlight.delete(root)
+				})
+			state.deepInFlight.set(root, deep)
+		}
 	}
 
 	let label: boolean | null = null
@@ -516,9 +583,7 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 	const method: 'execute' | 'run' | undefined =
 		typeof shell.execute === 'function'
 			? 'execute'
-			: typeof shell.run === 'function'
-				? 'run'
-				: undefined
+			: (typeof shell.run === 'function' ? 'run' : undefined)
 	if (method === undefined) {
 		return
 	}

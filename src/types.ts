@@ -49,6 +49,11 @@ export interface RepairConfig {
 	 * a bare `icacls <root> /grant "<user>:(OI)(CI)F"` so the repair path is not
 	 * dead on 0.1.7. The fallback refuses drive roots (D:\) for safety. Default true. */
 	grantFallback?: boolean
+	/** Background full-tree capability back-fill (icacls <root> /T, async):
+	 * after the shallow root-level pass, repair hardened subdirectories at any
+	 * depth (the fix-delete-acl.ts --all equivalent) so no manual script is
+	 * needed. Fire-and-forget, per-workspace probeCooldownMs cache. Default true. */
+	deepScan?: boolean
 }
 
 export interface ResolvedConfig extends RepairConfig {
@@ -64,6 +69,7 @@ export interface ResolvedConfig extends RepairConfig {
 	cooldownMs: number
 	appendDiagnostics: boolean
 	grantFallback: boolean
+	deepScan: boolean
 }
 
 export interface RepairOutcome {

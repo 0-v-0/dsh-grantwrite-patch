@@ -21,6 +21,8 @@ The plugin picks a strategy from the workspace size:
 - **Normal workspaces**: intercept the error in memory and retry with zero side effects — no file permissions are touched.
 - **Large workspaces**: when the object count exceeds the threshold (20,000 by default), proactively apply a full grant to the workspace once, so the write grant is not re-paid on every DSH restart and large trees stop costing you waiting time.
 - **Fallback**: when the above cannot apply, run the diagnose script once to repair permissions and retry; when the script is unavailable, fall back to an `icacls` grant.
+- **Capability back-fill** (v0.2.0+): on every workspace decision, explicitly back-fill the root's capability SIDs (write SIDs) onto hardened subdirectories that predate the grant (world Deny `FILE_DELETE_CHILD` without a capability Allow) — fixing upstream deepseek-harness [Discussion #423](https://github.com/deepseek-ai/deepseek-harness/discussions/423) / [#9559](https://github.com/deepseek-ai/deepseek-harness/discussions/9559), where pre-existing subdirs can neither be written nor deleted. Independent of the Low label (the deny is a DACL artifact), so it also runs in strict environments; idempotent with its own cooldown, touches only dirs that actually miss the ACE, never touches deny ACEs, and never broadens the grant (only the root's own capability SIDs are reused; Set-Acl constructs the SID directly because icacls cannot resolve S-1-4-*).
+- **Background deep back-fill** (v0.3.0+): after the shallow root-level pass, the plugin walks the whole tree (`icacls <root> /T`, async) in the background and back-fills hardened subdirs at *any* depth — node_modules/.git internals included — the equivalent of a manual `fix-delete-acl.ts --all` run, so no manual ACL script is needed. Fire-and-forget, never on the command path; one run per workspace per `probeCooldownMs`; toggle with `deepScan` (default `true`).
 
 The three paths never conflict; they stack on demand.
 
@@ -73,6 +75,7 @@ Notes:
       cooldownMs: 60000
       appendDiagnostics: true
       grantFallback: true      # fall back to a bare icacls grant when the diagnose script is unavailable (0.1.7) or fails; drive roots refused
+      deepScan: true           # background full-tree capability back-fill (fix-delete-acl.ts --all equivalent)
       # scriptPath: <absolute path>   # default: resolved from @deepseek-ai/dsh-sandbox-windows-acl package assets (DSH >= 0.2.x)
       # outDir: <absolute path>       # default: $DSH_HOME/grantwrite-patch (~/.dsh/grantwrite-patch without DSH_HOME)
 ```
@@ -82,6 +85,7 @@ Notes:
 - **patch path**: touches no system ACL and leaves no persistent side effect; the `WRITE_RESTRICTED` restricted token, capability-SID Allow ACEs, and the world-SID `FILE_DELETE_CHILD` Deny are preserved. The only thing lost is the Low-integrity label layer of defence in depth (children run at Medium), and only on hosts that could not apply the label in the first place.
 - **repair path**: the repair scope is bounded by the script's `-AllowRoot`: only the target directory or objects strictly inside it are modified; reparse points and managed-application trees are refused; deny ACEs are never deleted; every change is backed up first and re-read for verification, and a failed batch is rolled back.
 - **grant fallback** (`grantFallback`): when the script is unavailable or fails, run a bare `icacls <root> /grant "<user>:(OI)(CI)F"`. **Drive roots are hard-refused** (`isDriveRoot`: `D:\` and other drive roots are refused; only real workspaces are granted); inheritance policy is untouched and deny ACEs are not removed; roll back with `icacls <root> /remove:g "<user>"`. The script is preferred (safer: `-AllowRoot` bound + backup + verify); the fallback only covers the gap.
+- **deep back-fill** (`deepScan`): same capability-SID Allow as the shallow pass, just at any depth; each hit is re-checked before granting (already-fixed dirs are skipped), so it stays idempotent and never broadens the grant. The `/T` walk is background, so it cannot stall the command path; a timed-out scan is reported and retried next window.
 - The plugin process is the host process (a non-restricted token); modifying permissions is exactly what the sandbox's restricted token cannot do. The plugin never elevates its token.
 - Only `SetNamedSecurityInfoW` failures in a `grantWrite` context are matched; other Win32 failures, command exit codes, EPERM, and so on all pass through untouched.
 - The retry happens once (`maxRetries` is tunable from 0 to 3); a failed repair is not retried, which prevents loops.
