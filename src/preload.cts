@@ -10,7 +10,7 @@
  * 成功。区别仅是命名空间（环境变量前缀、状态文件路径）与本插件实例对齐。
  *
  * 背景（上游已知问题，Discussions #7771 / #7720 / #7804）：
- *   0.1.7 的 Windows ACL 沙箱（@deepseek-ai/dsh-sandbox-windows-acl）在
+ *   DSH 的 Windows ACL 沙箱（@deepseek-ai/dsh-sandbox-windows-acl）在
  *   授权工作区时，用一次 SetNamedSecurityInfoW 同时下发三样东西：
  *     1) capability SID 的 Allow ACE（DACL）
  *     2) world SID 的 FILE_DELETE_CHILD Deny ACE（DACL）
@@ -101,9 +101,9 @@ function resolveDshHome() {
 	const expanded =
 		base === '~'
 			? os.homedir()
-			: base.startsWith('~/') || base.startsWith('~\\')
+			: (base.startsWith('~/') || base.startsWith('~\\')
 				? path.join(os.homedir(), base.slice(2))
-				: base
+				: base)
 	return path.resolve(expanded)
 }
 

@@ -3,10 +3,10 @@
 # optional `shell` service (see lib/index.js) and does nothing when the service
 # is absent (e.g. non-Windows compositions).
 #
-# Requires DSH >= 0.1.7-rc.1 (engines.dsh). The diagnose script is resolved at
+# Requires DSH >= 0.2.0-rc.2 (engines.dsh). The diagnose script is resolved at
 # runtime from the @deepseek-ai/dsh-sandbox-windows-acl package assets (shipped
-# since 0.2.x), not bundled with this plugin: on DSH 0.1.7 the package has no
-# assets, so the repair path fails closed and only the FFI patch is active.
+# since 0.2.0-rc.2), not bundled with this plugin: when those assets are missing the
+# repair path fails closed and only the FFI patch is active.
 #
 # Default strategy (mode auto): install the FFI-level patch (lib/preload.cjs,
 # adapted from dsh-acl-sandbox-patch, MIT) so grantWrite succeeds without
@@ -33,7 +33,7 @@
         # Per-workspace probe/decision cache duration.
         probeCooldownMs: 3600000
         # diagnose-windows-sandbox-acl.ps1 resolved from
-        # @deepseek-ai/dsh-sandbox-windows-acl assets (DSH >= 0.2.x). Override
+        # @deepseek-ai/dsh-sandbox-windows-acl assets (DSH >= 0.2.0-rc.2). Override
         # to point at a specific copy.
         # scriptPath: ""
         # Recovery/report directory (-Out of the repair script). Defaults to
@@ -48,8 +48,15 @@
         # Annotate the thrown error with a short summary when the retry still
         # fails; the successful path is invisible to the model either way.
         appendDiagnostics: true
-        # When the diagnose script is unavailable (DSH 0.1.7 has no assets)
-        # or fails, fall back to a bare `icacls <root> /grant "<user>:(OI)(CI)F`.
+        # When the diagnose script is unavailable (assets missing) or fails,
+        # fall back to a bare `icacls <root> /grant "<user>:(OI)(CI)F`.
         # Drive roots (D:\) are refused. Roll back with
         # `icacls <root> /remove:g "<user>". Default true.
         grantFallback: true
+        # Background full-tree capability back-fill: after the shallow
+        # root-level pass, walk the whole tree (icacls <root> /T, async) and
+        # back-fill hardened subdirs at any depth — node_modules/.git internals
+        # included (the fix-delete-acl.ts --all equivalent). Fire-and-forget,
+        # never on the command path; one run per workspace per probeCooldownMs.
+        # Default true.
+        deepScan: true

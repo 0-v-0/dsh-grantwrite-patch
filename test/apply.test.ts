@@ -5,6 +5,9 @@ import { apply } from '../src/index.ts'
 const WS = 'D:\\ws'
 const WIN32_ERR = () => new Error('Error: SetNamedSecurityInfoW failed (Win32 5): grantWrite')
 
+/** Stub the background deep scan: no real icacls /T spawns in tests. */
+const deepStub = async () => ({ fixed: [], skipped: 0 })
+
 function makeCtx(impl: (spec: unknown) => Promise<unknown> | unknown) {
 	let calls = 0
 	const shell = {
@@ -26,6 +29,7 @@ test('apply: repair then retry succeeds invisibly', async () => {
 		ctx,
 		{},
 		{
+			deepRunner: deepStub,
 			runner: async () => {
 				repairs += 1
 				return { ok: true, recap: '{"nextAction":"verify_original_confined_operation"}' }
@@ -52,6 +56,7 @@ test('apply: repair ok but retry still grantWrite-fails -> annotated error, no l
 		ctx,
 		{},
 		{
+			deepRunner: deepStub,
 			runner: async () => {
 				repairs += 1
 				return { ok: true }
@@ -76,7 +81,7 @@ test('apply: repair not verified -> no retry, original error propagates', async 
 	const { ctx, count } = makeCtx(() => {
 		throw WIN32_ERR()
 	})
-	apply(ctx, {}, { runner: async () => ({ ok: false, recap: '{"nextAction":"stop"}' }) })
+	apply(ctx, {}, { deepRunner: deepStub, runner: async () => ({ ok: false, recap: '{"nextAction":"stop"}' }) })
 	const spec = { command: 'x', workdir: WS }
 	await assert.rejects(ctx.shell.execute(spec), (e: Error) => e.message.includes('grantWrite'))
 	assert.equal(count(), 1)
@@ -92,6 +97,7 @@ test('apply: unrelated errors are untouched', async () => {
 		ctx,
 		{},
 		{
+			deepRunner: deepStub,
 			runner: async () => {
 				repairs += 1
 				return { ok: true }
@@ -115,6 +121,7 @@ test('apply: no workspace root in spec -> no repair, error propagates', async ()
 		ctx,
 		{},
 		{
+			deepRunner: deepStub,
 			runner: async () => {
 				repairs += 1
 				return { ok: true }
@@ -150,6 +157,7 @@ test('apply: run-only shells are wrapped via the run fallback', async () => {
 		ctx,
 		{},
 		{
+			deepRunner: deepStub,
 			runner: async () => ({
 				ok: true,
 				recap: '{"nextAction":"verify_original_confined_operation"}',

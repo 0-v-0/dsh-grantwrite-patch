@@ -68,10 +68,12 @@ test('resolveConfig defaults: sandbox-package script (empty in test env), DSH_HO
 	assert.ok(opts.outDir.includes('grantwrite-patch'))
 	assert.equal(opts.maxRetries, 1)
 	assert.equal(opts.repairTimeoutMs, 120000)
-	const over = resolveConfig({ maxRetries: 2, outDir: 'O', scriptPath: 'S' })
+	assert.equal(opts.deepScan, true)
+	const over = resolveConfig({ deepScan: false, maxRetries: 2, outDir: 'O', scriptPath: 'S' })
 	assert.equal(over.scriptPath, 'S')
 	assert.equal(over.outDir, 'O')
 	assert.equal(over.maxRetries, 2)
+	assert.equal(over.deepScan, false)
 })
 
 test('resolveDshHome honors DSH_HOME and falls back to ~/.dsh', () => {
@@ -164,8 +166,8 @@ test('isVerifiedRepair: real script output shapes', () => {
 	assert.ok(isVerifiedRepair(summaryWithAction, 0))
 })
 
-test('runRepairScript fails closed when no sandbox-package script is resolvable (DSH 0.1.7)', async () => {
-	// DSH 0.1.7: the sandbox package ships no assets -> default scriptPath is empty.
+test('runRepairScript fails closed when no sandbox-package script is resolvable', async () => {
+	// Sandbox package ships no assets -> default scriptPath is empty.
 	const opts = resolveConfig({})
 	assert.equal(opts.scriptPath, '')
 	const outcome = await runRepairScript('R', opts)
@@ -195,8 +197,8 @@ test('grantFullControl refuses a drive root without spawning icacls', async () =
 	assert.match(outcome.stderr ?? '', /refused: grantFullControl denied on a drive root/)
 })
 
-test('runRepair falls back to grantFullControl when the script is unavailable (0.1.7), refuses drive roots', async () => {
-	// 0.1.7: no sandbox-package assets -> scriptPath empty -> runRepairScript fails closed.
+test('runRepair falls back to grantFullControl when the script is unavailable, refuses drive roots', async () => {
+	// No sandbox-package assets -> scriptPath empty -> runRepairScript fails closed.
 	const opts = resolveConfig({})
 	assert.equal(opts.scriptPath, '')
 	assert.equal(opts.grantFallback, true)
