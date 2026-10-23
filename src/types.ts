@@ -33,7 +33,7 @@ export interface RepairConfig {
 	/** How long a per-workspace probe/decision stays cached (ms). Default 3600000. */
 	probeCooldownMs?: number
 	/** Path to diagnose-windows-sandbox-acl.ps1. Default: resolved from
-	 * @deepseek-ai/dsh-sandbox-windows-acl package assets (DSH >= 0.2.x). */
+	 * @deepseek-ai/dsh-sandbox-windows-acl package assets (DSH >= 0.2.0-rc.2). */
 	scriptPath?: string
 	/** Recovery/report directory (-Out). Default: $DSH_HOME/grantwrite-patch (~/.dsh/grantwrite-patch). */
 	outDir?: string
@@ -45,10 +45,16 @@ export interface RepairConfig {
 	cooldownMs?: number
 	/** Append a short diagnosis to the thrown error when the retry still fails. Default true. */
 	appendDiagnostics?: boolean
-	/** When the diagnose script is unavailable (DSH 0.1.7) or fails, fall back to
-	 * a bare `icacls <root> /grant "<user>:(OI)(CI)F"` so the repair path is not
-	 * dead on 0.1.7. The fallback refuses drive roots (D:\) for safety. Default true. */
+	/** When the diagnose script is unavailable (sandbox package assets missing) or
+	 * fails, fall back to a bare `icacls <root> /grant "<user>:(OI)(CI)F"` so the
+	 * repair path is not dead. The fallback refuses drive roots (D:\) for safety.
+	 * Default true. */
 	grantFallback?: boolean
+	/** Background full-tree capability back-fill (icacls <root> /T, async):
+	 * after the shallow root-level pass, repair hardened subdirectories at any
+	 * depth (the fix-delete-acl.ts --all equivalent) so no manual script is
+	 * needed. Fire-and-forget, per-workspace probeCooldownMs cache. Default true. */
+	deepScan?: boolean
 }
 
 export interface ResolvedConfig extends RepairConfig {
@@ -64,6 +70,7 @@ export interface ResolvedConfig extends RepairConfig {
 	cooldownMs: number
 	appendDiagnostics: boolean
 	grantFallback: boolean
+	deepScan: boolean
 }
 
 export interface RepairOutcome {
