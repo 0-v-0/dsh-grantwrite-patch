@@ -31,7 +31,6 @@ import { existsSync, mkdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
-import { installPatch, loadPreload } from './patch.ts'
 import type {
 	CtxLike,
 	RepairConfig,
@@ -40,6 +39,7 @@ import type {
 	ResolvedConfig,
 	ShellSpec,
 } from './types.ts'
+import { installPatch, loadPreload } from './patch.ts'
 import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
 
 export const name = 'dsh-grantwrite-patch'
@@ -60,8 +60,12 @@ const DSH_HOME_ENV = 'DSH_HOME'
 
 /** Expand supported tilde prefixes against the OS home (host `expandHomePath` equivalent). */
 function expandHomePath(p: string): string {
-	if (p === '~') {return os.homedir()}
-	if (p.startsWith('~/') || p.startsWith('~\\')) {return path.join(os.homedir(), p.slice(2))}
+	if (p === '~') {
+		return os.homedir()
+	}
+	if (p.startsWith('~/') || p.startsWith('~\\')) {
+		return path.join(os.homedir(), p.slice(2))
+	}
 	return p
 }
 
@@ -84,7 +88,9 @@ export function resolveDshHome(env: Record<string, string | undefined> = process
  */
 function defaultBases(): string[] {
 	const bases: string[] = []
-	if (typeof process.argv[1] === 'string' && process.argv[1]) {bases.push(process.argv[1])}
+	if (typeof process.argv[1] === 'string' && process.argv[1]) {
+		bases.push(process.argv[1])
+	}
 	try {
 		bases.push(process.cwd())
 	} catch {
@@ -96,8 +102,9 @@ function defaultBases(): string[] {
 /** createRequire for a file path or a directory. */
 function makeRequire(base: string) {
 	try {
-		if (statSync(base).isDirectory())
-			{return createRequire(path.join(base, '__plugin_resolve__.cjs'))}
+		if (statSync(base).isDirectory()) {
+			return createRequire(path.join(base, '__plugin_resolve__.cjs'))
+		}
 	} catch {
 		/* treat as a file path */
 	}
@@ -123,7 +130,9 @@ export function resolveSandboxScript(bases: string[] = defaultBases()): string |
 				'scripts',
 				'diagnose-windows-sandbox-acl.ps1',
 			)
-			if (existsSync(script)) {return script}
+			if (existsSync(script)) {
+				return script
+			}
 		} catch {
 			/* try next base */
 		}
@@ -154,18 +163,28 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 /** The Win32Error may arrive bare or wrapped (AggregateError with cleanup). */
 export function isGrantWriteError(err: unknown): boolean {
 	if (err instanceof Error) {
-		if (GRANT_WRITE_RE.test(err.message)) {return true}
-		if (err instanceof AggregateError) {
-			for (const sub of err.errors) {if (isGrantWriteError(sub)) {return true}}
+		if (GRANT_WRITE_RE.test(err.message)) {
+			return true
 		}
-		if (isGrantWriteError(err.cause)) {return true}
+		if (err instanceof AggregateError) {
+			for (const sub of err.errors) {
+				if (isGrantWriteError(sub)) {
+					return true
+				}
+			}
+		}
+		if (isGrantWriteError(err.cause)) {
+			return true
+		}
 	}
 	return false
 }
 
 /** Workspace root from the spec; fall back to workdir when policy is absent. */
 export function resolveRoot(spec: ShellSpec | undefined): string | undefined {
-	if (!spec) {return undefined}
+	if (!spec) {
+		return undefined
+	}
 	return spec.sandboxPolicy?.workspaceRoot ?? spec.workdir
 }
 
@@ -230,7 +249,7 @@ export function isDriveRoot(p: string): boolean {
 		.normalize(p)
 		.replace(/[\\/]+$/, '')
 		.replace(/\.+$/, '')
-	return /^[A-Za-z]:$/i.test(norm)
+	return /^[A-Z]:$/i.test(norm)
 }
 
 /** Resolve the current user account name for icacls /grant. */
@@ -263,7 +282,7 @@ export function grantFullControl(root: string, opts: ResolvedConfig): Promise<Re
 				'-NoProfile',
 				'-NonInteractive',
 				'-Command',
-				`icacls '${root.replace(/'/g, "''")}' /grant '${user.replace(/'/g, "''")}:(OI)(CI)F'`,
+				`icacls '${root.replaceAll("'", "''")}' /grant '${user.replaceAll("'", "''")}:(OI)(CI)F'`,
 			],
 			{ stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
 		)
@@ -295,7 +314,9 @@ export function grantFullControl(root: string, opts: ResolvedConfig): Promise<Re
  */
 export function runRepair(root: string, opts: ResolvedConfig): Promise<RepairOutcome> {
 	return runRepairScript(root, opts).then((outcome) => {
-		if (outcome.ok || !opts.grantFallback) {return outcome}
+		if (outcome.ok || !opts.grantFallback) {
+			return outcome
+		}
 		return grantFullControl(root, opts)
 	})
 }
@@ -319,8 +340,12 @@ function lastRecapLine(stdout: string): string | undefined {
 	const lines = stdout.split(/\r?\n/)
 	for (let i = lines.length - 1; i >= 0; i--) {
 		const line = lines[i]
-		if (line === undefined) {continue}
-		if (line.startsWith('RECAP ')) {return line.slice('RECAP '.length).trim()}
+		if (line === undefined) {
+			continue
+		}
+		if (line.startsWith('RECAP ')) {
+			return line.slice('RECAP '.length).trim()
+		}
 	}
 	return undefined
 }
@@ -350,12 +375,18 @@ export function repairAcl(
 ): Promise<boolean> {
 	const now = Date.now()
 	const last = state.lastRepair.get(root)
-	if (last !== undefined && now - last < opts.cooldownMs) {return Promise.resolve(false)}
+	if (last !== undefined && now - last < opts.cooldownMs) {
+		return Promise.resolve(false)
+	}
 	const existing = state.inflight.get(root)
-	if (existing !== undefined) {return existing}
+	if (existing !== undefined) {
+		return existing
+	}
 	const p = runner(root, opts)
 		.then((outcome) => {
-			if (outcome.ok) {state.lastRepair.set(root, Date.now())}
+			if (outcome.ok) {
+				state.lastRepair.set(root, Date.now())
+			}
 			return outcome.ok
 		})
 		.finally(() => state.inflight.delete(root))
@@ -393,7 +424,9 @@ export async function decideWorkspace(
 	const runner = hooks.runner ?? runRepairScript
 	const now = Date.now()
 	const last = state.decided.get(root)
-	if (last !== undefined && now - last < opts.probeCooldownMs) {return}
+	if (last !== undefined && now - last < opts.probeCooldownMs) {
+		return
+	}
 
 	let label: boolean | null = null
 	try {
@@ -409,7 +442,7 @@ export async function decideWorkspace(
 
 	let large = false
 	try {
-		({ large } = await probe(root, opts.objectThreshold, opts.probeTimeoutMs))
+		;({ large } = await probe(root, opts.objectThreshold, opts.probeTimeoutMs))
 	} catch {
 		large = false
 	}
@@ -425,8 +458,9 @@ export async function decideWorkspace(
 
 /** Annotate a Win32Error with the repair summary for a persistent failure. */
 export function annotateError(err: unknown, root: string, recap: string | undefined): unknown {
-	if (!(err instanceof Error)) {return err}
-	if (recap === undefined) {return err}
+	if (!(err instanceof Error) || recap === undefined) {
+		return err
+	}
 	const note = `; dsh-grantwrite-patch: ACL repair of ${root} did not help (recap: ${recap})`
 	try {
 		const copy = Object.assign(Object.create(Object.getPrototypeOf(err)), err)
@@ -455,31 +489,43 @@ async function repairAndRetry(
 	lastErr: unknown,
 ): Promise<{ value: unknown } | { err: unknown }> {
 	const repaired = await repair()
-	if (!repaired) {return { err: lastErr }}
+	if (!repaired) {
+		return { err: lastErr }
+	}
 	try {
 		return { value: await run() }
-	} catch (err) {
-		if (!isGrantWriteError(err)) {throw err}
-		if (attemptsLeft <= 1) {return { err }}
-		return repairAndRetry(run, repair, attemptsLeft - 1, err)
+	} catch (e) {
+		if (!isGrantWriteError(e)) {
+			throw e
+		}
+		if (attemptsLeft <= 1) {
+			return { err: e }
+		}
+		return repairAndRetry(run, repair, attemptsLeft - 1, e)
 	}
 }
 
 export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps = {}): void {
-	const {shell} = ctx
-	if (!shell) {return}
+	const { shell } = ctx
+	if (!shell) {
+		return
+	}
 	// Native hosts (dsh-pwsh-local/-sandbox, dsh-bash-local/-sandbox) expose
 	// execute() and provisioning failures reject it; older compositions may
 	// expose a run() convenience instead. Wrap whichever exists.
 	const method: 'execute' | 'run' | undefined =
 		typeof shell.execute === 'function'
 			? 'execute'
-			: (typeof shell.run === 'function'
+			: typeof shell.run === 'function'
 				? 'run'
-				: undefined)
-	if (method === undefined) {return}
+				: undefined
+	if (method === undefined) {
+		return
+	}
 	const opts = resolveConfig(config)
-	if (!opts.enable) {return}
+	if (!opts.enable) {
+		return
+	}
 	const orig = (shell[method] as (spec: ShellSpec) => Promise<unknown>).bind(shell)
 	const state = makeRecoveryState()
 	const runner = deps.runner ?? runRepair
@@ -489,8 +535,8 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 		((root: string) =>
 			process.platform === 'win32' ? (loadPreload()?.workspaceHasLowLabel(root) ?? null) : null)
 
-	if (opts.mode !== 'repair') {
-		if (process.platform === 'win32') {installPatch()}
+	if (opts.mode !== 'repair' && process.platform === 'win32') {
+		installPatch()
 	}
 
 	shell[method] = async (spec: ShellSpec): Promise<unknown> => {
@@ -502,10 +548,14 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 		}
 		try {
 			return await orig(spec)
-		} catch (err) {
-			if (!isGrantWriteError(err)) {throw err}
+		} catch (e) {
+			if (!isGrantWriteError(e)) {
+				throw e
+			}
 			const root = resolveRoot(spec)
-			if (root === undefined) {throw err}
+			if (root === undefined) {
+				throw e
+			}
 
 			const maxRetries = Math.max(0, Math.min(3, opts.maxRetries))
 			const outcome =
@@ -514,10 +564,12 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 							() => orig(spec),
 							() => repairAcl(root, opts, state, runner),
 							maxRetries,
-							err,
+							e,
 						)
-					: { err }
-			if ('value' in outcome) {return outcome.value}
+					: { err: e }
+			if ('value' in outcome) {
+				return outcome.value
+			}
 			// Persistent grantWrite failure: report it, optionally annotated.
 			if (opts.appendDiagnostics) {
 				const recap = state.lastRepair.has(root)

@@ -14,8 +14,8 @@ console.log(
 let template
 try {
 	template = readHookTemplate('commit-msg', 'verify-commit-msg')
-} catch (err) {
-	console.error(err.message)
+} catch (e) {
+	console.error(e.message)
 	process.exit(1)
 }
 assertSnippetsFresh(template, ['constants', 'commitMsg'], 'verify-commit-msg', 'commit-msg')
@@ -77,6 +77,14 @@ const cases = [
 	['fix: 忽略 **/usr/** 目录', true, 'glob 模式(中文描述)不算绝对路径'],
 	['fix: ignore **/lib/** but see /etc/passwd', false, '同行 glob 不掩盖真绝对路径'],
 	['fix: /home/user 路径有中文标点,处理?', false, '中文问号紧邻路径仍须拦'],
+	['feat: subject with BEL \u0007', false, 'subject 含 BEL'],
+	['chore: body has FF \u000C inside', false, 'body 含 FF'],
+	['fixup! feat: clean \u000B subject', false, 'fixup subject 含 VT'],
+	['feat: subject with \u007F DEL', false, 'subject 含 DEL'],
+	['feat: normal subject', true, '干净 subject 不受影响'],
+	['feat: subject with ZWSP \u200B', false, 'subject 含 ZWSP'],
+	['feat: subject with bidi override \u202E', false, 'subject 含 bidi override'],
+	['feat: subject with ZWNBSP \uFEFF', false, 'subject 含 ZWNBSP'],
 ]
 
 let failed = 0

@@ -2,6 +2,7 @@
 import {
 	assertSnippetsFresh,
 	isOffendingAddedLine,
+	isControlAddedLine,
 	isSkippedPath,
 	readHookTemplate,
 } from './hook-logic.ts'
@@ -14,8 +15,8 @@ console.log(
 let template
 try {
 	template = readHookTemplate('pre-commit', 'verify-hook-regex')
-} catch (err) {
-	console.error(err.message)
+} catch (e) {
+	console.error(e.message)
 	process.exit(1)
 }
 assertSnippetsFresh(template, ['constants', 'preCommit'], 'verify-hook-regex', 'pre-commit')
@@ -116,6 +117,25 @@ const cases = [
 	['+"**/lib/**", // see /etc/passwd', true, 'glob 不掩盖同行真路径'],
 ]
 
+const ctlCases = [
+	['+\tconst a = 1; // ok', false, 'tab 缩进合法'],
+	['+normal line', false, '干净行'],
+	['+line with BEL \u0007 inside', true, '新增行含 BEL'],
+	['+line with FF \u000C inside', true, '新增行含 FF'],
+	['+line with NUL \u0000 inside', true, '新增行含 NUL'],
+	['+line with ESC \u001B inside', true, '新增行含 ESC'],
+	['+line with DEL \u007F inside', true, '新增行含 DEL'],
+	['+\t\tindent + BEL\u0007', true, 'tab 缩进不掩盖 BEL'],
+	['+++ b/ok\u0007.ts', false, 'diff 文件头(+++)不扫描'],
+	['  context line \u0007', false, '上下文行非新增'],
+	['-removed line \u0007', false, '删除行不扫描'],
+	['+line with ZWSP \u200B inside', true, '新增行含 ZWSP'],
+	['+line with ZWJ \u200D inside', true, '新增行含 ZWJ'],
+	['+line with bidi override \u202E inside', true, '新增行含 bidi override'],
+	['+line with soft hyphen \u00AD inside', true, '新增行含 soft hyphen'],
+	['+line with ZWNBSP \uFEFF inside', true, '新增行含 ZWNBSP'],
+]
+
 let failed = 0
 for (const [line, expected, label] of cases) {
 	const got = isOffendingAddedLine(line)
@@ -125,6 +145,17 @@ for (const [line, expected, label] of cases) {
 	}
 	console.log(`${mk}  expect=${expected}  got=${got}  :: ${label} :: ${line}`)
 }
-const total = failed + skipFailed
+let ctlFailed = 0
+for (const [line, expected, label] of ctlCases) {
+	const got = isControlAddedLine(line)
+	const mk = got === expected ? 'PASS' : 'FAIL'
+	if (got !== expected) {
+		ctlFailed += 1
+	}
+	console.log(
+		`${mk}  expect=${expected}  got=${got}  :: control :: ${label} :: ${JSON.stringify(line)}`,
+	)
+}
+const total = failed + skipFailed + ctlFailed
 console.log(total === 0 ? '\nALL PASS' : `\n${total} FAILED`)
 process.exit(total === 0 ? 0 : 1)

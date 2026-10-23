@@ -71,7 +71,9 @@ let koffiRef: any = null
 let koffiResolver: (() => any) | null = null
 
 function getKoffi() {
-	if (koffiRef) {return koffiRef}
+	if (koffiRef) {
+		return koffiRef
+	}
 	if (koffiResolver) {
 		try {
 			koffiRef = koffiResolver()
@@ -89,8 +91,8 @@ const DSH_HOME_ENV = 'DSH_HOME'
  * 显式 DSH_HOME > ~/.dsh。
  */
 function resolveDshHome() {
-	const os = require('os')
-	const path = require('path')
+	const os = require('node:os')
+	const path = require('node:path')
 	const fromEnv = process.env[DSH_HOME_ENV]
 	const base =
 		fromEnv !== undefined && fromEnv.trim().length > 0
@@ -99,9 +101,9 @@ function resolveDshHome() {
 	const expanded =
 		base === '~'
 			? os.homedir()
-			: (base.startsWith('~/') || base.startsWith('~\\')
+			: base.startsWith('~/') || base.startsWith('~\\')
 				? path.join(os.homedir(), base.slice(2))
-				: base)
+				: base
 	return path.resolve(expanded)
 }
 
@@ -114,14 +116,14 @@ function resolveDshHome() {
 function stateFilePaths() {
 	const paths = []
 	try {
-		const path = require('path')
+		const path = require('node:path')
 		paths.push(path.join(resolveDshHome(), 'grantwrite-patch', 'degraded.state'))
 	} catch {
 		/* home 解析失败时跳过 */
 	}
 	try {
-		const os = require('os')
-		const path = require('path')
+		const os = require('node:os')
+		const path = require('node:path')
 		paths.push(path.join(os.tmpdir(), 'dsh-grantwrite-patch-shared.state'))
 	} catch {
 		/* tmpdir 不可用时跳过 */
@@ -131,10 +133,12 @@ function stateFilePaths() {
 
 /** 任一状态文件记录"已降级"（每次调用现读，长生命周期 runner 需要感知服务端的新判定）。 */
 function stateFileSaysDegraded() {
-	const fs = require('fs')
+	const fs = require('node:fs')
 	for (const p of stateFilePaths()) {
 		try {
-			if (fs.readFileSync(p, 'utf8').trim() === '1') {return true}
+			if (fs.readFileSync(p, 'utf8').trim() === '1') {
+				return true
+			}
 		} catch {
 			/* 不存在或读不到，试下一个 */
 		}
@@ -146,10 +150,10 @@ function markDegraded() {
 	if (!degraded) {
 		degraded = true
 	}
-	const fs = require('fs')
+	const fs = require('node:fs')
 	for (const p of stateFilePaths()) {
 		try {
-			fs.mkdirSync(require('path').dirname(p), { recursive: true })
+			fs.mkdirSync(require('node:path').dirname(p), { recursive: true })
 			fs.writeFileSync(p, '1')
 		} catch {
 			/* 单个路径写失败不阻塞，其他路径仍可传播 */
@@ -159,7 +163,7 @@ function markDegraded() {
 
 /** 服务端启动时清除历史降级状态（新 run 重新判定）。 */
 function clearDegradedState() {
-	const fs = require('fs')
+	const fs = require('node:fs')
 	for (const p of stateFilePaths()) {
 		try {
 			fs.rmSync(p, { force: true })
@@ -170,7 +174,9 @@ function clearDegradedState() {
 }
 
 function isDegraded() {
-	if (degraded) {return true}
+	if (degraded) {
+		return true
+	}
 	if (stateFileSaysDegraded()) {
 		degraded = true
 		return true
@@ -184,9 +190,11 @@ function isDegraded() {
  * @returns 工作区绝对路径，或 null（非 runner 进程/无该参数）。
  */
 function workspaceFromArgv() {
-	const {argv} = process
+	const { argv } = process
 	for (let i = 0; i < argv.length - 1; i++) {
-		if (argv[i] === '--workspace' && typeof argv[i + 1] === 'string' && argv[i + 1]) {return argv[i + 1]}
+		if (argv[i] === '--workspace' && typeof argv[i + 1] === 'string' && argv[i + 1]) {
+			return argv[i + 1]
+		}
 	}
 	return null
 }
@@ -200,9 +208,13 @@ let labelProbeCache: boolean | null = null
  * @returns true=有标签（严格环境）/ false=无标签（降级环境）/ null=探测失败（未知）
  */
 function workspaceHasLowLabel(dir) {
-	if (labelProbeCache !== null) {return labelProbeCache}
+	if (labelProbeCache !== null) {
+		return labelProbeCache
+	}
 	const koffi = getKoffi()
-	if (!koffi) {return null}
+	if (!koffi) {
+		return null
+	}
 	try {
 		const PVOID = koffi.pointer('void')
 		const advapi32 = koffi.load('advapi32.dll')
@@ -214,7 +226,9 @@ function workspaceHasLowLabel(dir) {
 		const slot = () => koffi.alloc(PVOID, 1)
 		const [owner, group, dacl, sacl, descriptor] = [slot(), slot(), slot(), slot(), slot()]
 		const result = getNamed(dir, 1, 20, owner, group, dacl, sacl, descriptor)
-		if (result !== 0) {return null}
+		if (result !== 0) {
+			return null
+		}
 		const saclPtr = koffi.decode(sacl, 0, PVOID)
 		if (saclPtr === null || koffi.address(saclPtr) === 0) {
 			labelProbeCache = false
@@ -229,7 +243,9 @@ function workspaceHasLowLabel(dir) {
 				labelProbeCache = true
 				return true
 			} // SYSTEM_MANDATORY_LABEL_ACE_TYPE
-			if (aceSize < 8) {break}
+			if (aceSize < 8) {
+				break
+			}
 			offset += aceSize
 		}
 		labelProbeCache = false
@@ -241,15 +257,23 @@ function workspaceHasLowLabel(dir) {
 
 /** 包装一个已绑定的 FFI SetNamedSecurityInfoW。 */
 function wrapSetNamedSecurityInfoW(orig) {
-	if (!orig || orig.__dshAclWrapped) {return orig}
+	if (!orig || orig.__dshAclWrapped) {
+		return orig
+	}
 	const wrapped = function setNamedSecurityInfoW(path, objectType, securityInfo, ...rest) {
 		const touchesLabel =
 			(securityInfo & (LABEL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION)) !== 0
-		if (!touchesLabel) {return orig(path, objectType, securityInfo, ...rest)}
+		if (!touchesLabel) {
+			return orig(path, objectType, securityInfo, ...rest)
+		}
 		// 先按原语义完整尝试（含 Low 标签）——环境健康时保持严格行为
 		const strict = orig(path, objectType, securityInfo, ...rest)
-		if (strict === 0) {return 0}
-		if (strict !== ERROR_ACCESS_DENIED) {return strict}
+		if (strict === 0) {
+			return 0
+		}
+		if (strict !== ERROR_ACCESS_DENIED) {
+			return strict
+		}
 		// 无 WRITE_OWNER（或写 SACL 特权缺失）：剥掉标签位，仅下发 DACL
 		markDegraded()
 		const stripped =
@@ -264,15 +288,21 @@ function wrapSetNamedSecurityInfoW(orig) {
 
 /** 包装一个已绑定的 FFI SetTokenInformation。 */
 function wrapSetTokenInformation(orig) {
-	if (!orig || orig.__dshAclWrapped) {return orig}
+	if (!orig || orig.__dshAclWrapped) {
+		return orig
+	}
 	const wrapped = function setTokenInformation(token, informationClass, information, length) {
 		if (informationClass === TOKEN_INTEGRITY_LEVEL) {
 			// 判据 1：状态文件 / 环境变量 / 进程标志（服务端观测到降级即写入）
-			if (isDegraded()) {return 1}
+			if (isDegraded()) {
+				return 1
+			}
 			// 判据 2（自包含的事实）：工作区当前有无 Low 标签。无标签 ⇒ 降级环境，Low 子进程
 			// 将因 no-write-up 无法写入工作区，故不降；有标签 ⇒ 严格环境，正常降。
 			const workspace = workspaceFromArgv()
-			if (workspace !== null && workspaceHasLowLabel(workspace) === false) {return 1}
+			if (workspace !== null && workspaceHasLowLabel(workspace) === false) {
+				return 1
+			}
 		}
 		return orig(token, informationClass, information, length)
 	}
@@ -315,7 +345,9 @@ function buildFakeLabelAcl(koffi) {
  * Low 标签 ACL 指针写进 ppSacl 输出槽，使幂等跳过重新生效。
  */
 function wrapGetNamedSecurityInfoW(orig) {
-	if (!orig || orig.__dshAclWrapped) {return orig}
+	if (!orig || orig.__dshAclWrapped) {
+		return orig
+	}
 	const wrapped = function getNamedSecurityInfoW(path, objectType, securityInfo, ...rest) {
 		const [owner, group, dacl, sacl, descriptor] = rest
 		const touchesLabel = (securityInfo & LABEL_SECURITY_INFORMATION) !== 0
@@ -323,14 +355,18 @@ function wrapGetNamedSecurityInfoW(orig) {
 			return orig(path, objectType, securityInfo, ...rest)
 		}
 		const koffi = getKoffi()
-		if (!koffi) {return orig(path, objectType, securityInfo, ...rest)}
+		if (!koffi) {
+			return orig(path, objectType, securityInfo, ...rest)
+		}
 		let fake
 		try {
 			fake = buildFakeLabelAcl(koffi)
 		} catch {
 			fake = null
 		}
-		if (fake == null) {return orig(path, objectType, securityInfo, ...rest)}
+		if (fake == null) {
+			return orig(path, objectType, securityInfo, ...rest)
+		}
 		const result = orig(
 			path,
 			objectType,
@@ -341,7 +377,9 @@ function wrapGetNamedSecurityInfoW(orig) {
 			sacl,
 			descriptor,
 		)
-		if (result !== 0) {return result}
+		if (result !== 0) {
+			return result
+		}
 		try {
 			koffi.encode(sacl, koffi.pointer('void'), fake)
 		} catch {
@@ -365,9 +403,13 @@ function wrapGetNamedSecurityInfoW(orig) {
  * （首参为约定串、次参为函数名）时才包装返回；其余一律原样透传。
  */
 function patchKoffi(koffi) {
-	if (!koffi || koffi.__dshAclKoffiPatched) {return false}
+	if (!koffi || koffi.__dshAclKoffiPatched) {
+		return false
+	}
 	const origLoad = koffi.load
-	if (typeof origLoad !== 'function') {return false}
+	if (typeof origLoad !== 'function') {
+		return false
+	}
 	const patchedLoad = function load(lib, ...rest) {
 		const loaded = origLoad.call(koffi, lib, ...rest)
 		if (
@@ -386,12 +428,20 @@ function patchKoffi(koffi) {
 				typeof allArgs[0] === 'string' &&
 				typeof allArgs[1] === 'string' &&
 				allArgs[2] !== undefined
-			if (!isFourArgForm) {return origFunc.apply(this, allArgs)} // 声明式等一切其他形式：原样透传
+			if (!isFourArgForm) {
+				return origFunc.apply(this, allArgs)
+			} // 声明式等一切其他形式：原样透传
 			const name = allArgs[1]
 			const fn = origFunc.apply(this, allArgs)
-			if (name === 'SetNamedSecurityInfoW') {return wrapSetNamedSecurityInfoW(fn)}
-			if (name === 'SetTokenInformation') {return wrapSetTokenInformation(fn)}
-			if (name === 'GetNamedSecurityInfoW') {return wrapGetNamedSecurityInfoW(fn)}
+			if (name === 'SetNamedSecurityInfoW') {
+				return wrapSetNamedSecurityInfoW(fn)
+			}
+			if (name === 'SetTokenInformation') {
+				return wrapSetTokenInformation(fn)
+			}
+			if (name === 'GetNamedSecurityInfoW') {
+				return wrapGetNamedSecurityInfoW(fn)
+			}
 			return fn
 		}
 		wrappedFunc.__dshAclWrapped = true
@@ -424,7 +474,9 @@ function patchKoffi(koffi) {
 
 /** 直接包装沙箱包的共享 api 绑定表（进程内服务端路径，与绑定时序无关）。 */
 function wrapApiTable(api) {
-	if (!api || api.__dshAclTableWrapped) {return false}
+	if (!api || api.__dshAclTableWrapped) {
+		return false
+	}
 	if (typeof api.setNamedSecurityInfoW === 'function') {
 		api.setNamedSecurityInfoW = wrapSetNamedSecurityInfoW(api.setNamedSecurityInfoW)
 	}
@@ -443,10 +495,12 @@ function wrapApiTable(api) {
  * 异步（dynamic import）；在 preload 场景作为 koffi 钩子之外的冗余路径。
  */
 async function patchSandboxTableAsync() {
-	const { createRequire } = require('module')
-	const { pathToFileURL } = require('url')
+	const { createRequire } = require('node:module')
+	const { pathToFileURL } = require('node:url')
 	const bases = []
-	if (typeof process.argv[1] === 'string' && process.argv[1]) {bases.push(process.argv[1])}
+	if (typeof process.argv[1] === 'string' && process.argv[1]) {
+		bases.push(process.argv[1])
+	}
 	try {
 		bases.push(process.cwd())
 	} catch {
@@ -454,7 +508,9 @@ async function patchSandboxTableAsync() {
 	}
 	// 各解析基准需顺序尝试（后者依赖前者失败），故用递归而非循环里的 await。
 	const tryBase = async (i) => {
-		if (i >= bases.length) {return false}
+		if (i >= bases.length) {
+			return false
+		}
 		try {
 			const req = createRequire(bases[i])
 			const entry = req.resolve('@deepseek-ai/dsh-sandbox-windows-acl')
@@ -491,15 +547,20 @@ function isKoffiRequest(request) {
 /** 补包装 require.cache 里已加载的 koffi 导出（表可能已被提前绑定）。 */
 function patchCachedKoffi(key) {
 	const m = require.cache[key]
-	if (!m || !m.exports) {return}
-	const target = m.exports.default && m.exports.default !== m.exports ? m.exports.default : m.exports
-	if (target && typeof target.load === 'function') {koffiRef ??= target}
+	if (!m || !m.exports) {
+		return
+	}
+	const target =
+		m.exports.default && m.exports.default !== m.exports ? m.exports.default : m.exports
+	if (target && typeof target.load === 'function') {
+		koffiRef ??= target
+	}
 	patchKoffi(target)
 }
 
 function install() {
 	// A. CJS 钩子：任何进程（含 ESM 消费者内部走的 CJS require）首次 require('koffi') 即被包装
-	const Module = require('module')
+	const Module = require('node:module')
 	if (!Module.__dshAclHooked) {
 		const origLoad = Module._load
 		Module._load = function hookedLoad(request, _parent, _isMain) {
@@ -508,9 +569,13 @@ function install() {
 				try {
 					const target =
 						loaded && loaded.default && loaded.default !== loaded ? loaded.default : loaded
-					if (target && typeof target.load === 'function') {koffiRef ??= target}
+					if (target && typeof target.load === 'function') {
+						koffiRef ??= target
+					}
 					patchKoffi(target)
-					if (target && target !== loaded) {patchKoffi(loaded)}
+					if (target && target !== loaded) {
+						patchKoffi(loaded)
+					}
 				} catch {
 					/* 非 koffi 模块或已冻结，忽略 */
 				}
@@ -522,7 +587,9 @@ function install() {
 	// koffi 可能已被提前加载（表已绑）：直接补包装缓存中的导出
 	try {
 		for (const key of Object.keys(require.cache)) {
-			if (isKoffiRequest(key)) {patchCachedKoffi(key)}
+			if (isKoffiRequest(key)) {
+				patchCachedKoffi(key)
+			}
 		}
 	} catch {
 		/* cache 遍历失败不影响钩子 */

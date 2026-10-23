@@ -27,7 +27,9 @@ let preloadRef: PreloadExports | null = null
 
 /** Load the compiled preload core once. Returns null when it cannot be required. */
 export function loadPreload(): PreloadExports | null {
-	if (preloadRef) {return preloadRef}
+	if (preloadRef) {
+		return preloadRef
+	}
 	try {
 		preloadRef = createRequire(import.meta.url)('./preload.cjs') as PreloadExports
 	} catch {
@@ -41,7 +43,9 @@ export function loadPreload(): PreloadExports | null {
  * spaces. When the plugin path does, copy preload.cjs to a temp dir.
  */
 export function pickPreloadPath(): string {
-	if (!/\s/.test(PRELOAD)) {return PRELOAD}
+	if (!/\s/.test(PRELOAD)) {
+		return PRELOAD
+	}
 	try {
 		const dir = path.join(os.tmpdir(), 'dsh-grantwrite-patch')
 		mkdirSync(dir, { recursive: true })
@@ -57,14 +61,18 @@ export function pickPreloadPath(): string {
 export function ensureNodeOptions(): void {
 	const arg = `--require=${pickPreloadPath()}`
 	const current = (process.env.NODE_OPTIONS ?? '').trim()
-	if (current.includes(arg)) {return}
+	if (current.includes(arg)) {
+		return
+	}
 	process.env.NODE_OPTIONS = current ? `${current} ${arg}` : arg
 }
 
 /** Install the FFI patch into this process and its children. Never throws. */
 export function installPatch(): boolean {
 	const preload = loadPreload()
-	if (!preload) {return false}
+	if (!preload) {
+		return false
+	}
 	try {
 		preload.clearDegradedState()
 		preload.install() // idempotent (guarded); koffi hook + shared api-table wrap

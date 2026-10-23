@@ -43,7 +43,7 @@ export function readSharedSnippet(region: string): string {
 //   - POSIX 系统目录:/ + 白名单目录 + 可选一级名(≥1 字符,允许非 ASCII);单段(如 etc)也命中;
 //     前字符非路径成分字符,排除相对引用、URL 与正则字面量相邻段;i 覆盖大小写
 const ABS_PATH =
-	/(?:^|[^A-Za-z])([A-Za-z]:[\u005c/](?![\u005c/]))|(?<![A-Za-z0-9_.\u002f-])(\u002f(?:home|Users|root|etc|usr|var|opt|srv|tmp|mnt|media|data|bin|lib|dev|proc|sys|run|boot|sbin)(?:\u002f(?:[^\s\u002f]|$))?)/i
+	/(?:^|[^A-Z])([A-Z]:[\u005c/](?![\u005c/]))|(?<![A-Z0-9_.\u002f-])(\u002f(?:home|Users|root|etc|usr|var|opt|srv|tmp|mnt|media|data|bin|lib|dev|proc|sys|run|boot|sbin)(?:\u002f(?:[^\s\u002f]|$))?)/i
 // glob 模式豁免:**/lib/**、/lib/*.ts、src/{a,b} 是通配符而非真实机器路径,不应被拦。
 // 实现按空白/引号切 token 逐个判定(而非整行),避免邻近的通配符把真路径放过;
 // 仅当通配符与 '/' 或另一通配符相邻才算 glob 形状,正文里的孤立 '?' 仍会被拦。
@@ -65,11 +65,12 @@ function tokenHasGlobShape(token) {
 // 行内是否含真实绝对路径:逐 token 判定,glob 形状 token 直接跳过
 function hasAbsolutePath(line) {
 	for (const token of line.split(TOKEN_SPLIT)) {
-		if (token === '' || tokenHasGlobShape(token)) {
-			continue
-		}
-		// 纯盘根放行
-		if (/^[^A-Za-z]*[A-Za-z]:[\\/]?[^A-Za-z0-9_]*$/.test(token)) {
+		// 空 token、glob 形状或纯盘根放行
+		if (
+			token === '' ||
+			tokenHasGlobShape(token) ||
+			/^[^A-Za-z]*[A-Za-z]:[^A-Za-z0-9_]*$/.test(token)
+		) {
 			continue
 		}
 		if (ABS_PATH.test(token)) {
@@ -86,6 +87,9 @@ const GIT_PREFIX = /^(fixup|squash|amend)! /
 // 与 GIT_PREFIX 同集合,空白贪婪(\s+),用于取出 target
 const FIXUP_PREFIX = /^(fixup|squash|amend)!\s+/
 const SHORT_HASH = /^\s*[0-9a-f]{7,40}\s*$/
+// 控制字符与不可见 Unicode 格式字符(排除 \t \n \r):C0 其余 + DEL + 零宽/双向/行分隔,腐蚀文件与工具链,禁止入提交
+const BAD_CONTROL =
+	/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u200B-\u200F\u2028-\u202E\u2060\u2066-\u2069\uFEFF]/
 // --- shared snippet end ---
 
 // --- shared snippet begin: commit-msg check ---
@@ -93,8 +97,12 @@ const SHORT_HASH = /^\s*[0-9a-f]{7,40}\s*$/
 function filterCommitLines(raw) {
 	return raw.split(/\r?\n/).filter((line) => line.length > 0 && !line.startsWith('#'))
 }
-// 判定顺序:绝对路径 → fixup 目标 → Conventional 格式
+// 判定顺序:控制字符 → 绝对路径 → fixup 目标 → Conventional 格式
 function checkCommitSubject(lines) {
+	const ctlHit = lines.find((line) => hasControlChar(line))
+	if (ctlHit) {
+		return { hit: ctlHit, kind: 'control', pass: false }
+	}
 	const absHit = lines.find((line) => hasAbsolutePath(line))
 	if (absHit) {
 		return { hit: absHit, kind: 'abs', pass: false }
@@ -113,8 +121,12 @@ function checkCommitSubject(lines) {
 	}
 	return { hit: subject, kind: 'format', pass: false }
 }
+// 提交信息行内是否含非法控制字符或不可见格式字符(\t 合法)
+function hasControlChar(s) {
+	return BAD_CONTROL.test(s)
+}
 // --- shared snippet begin: pre-commit check ---
-// 跳过 node_modules/.git/.githooks 与钩子脚本自身(verify 含绝对路径测试数据、install-hooks 内嵌 shebang,避免自匹配);
+// 跳过 node_modules/.git/.githooks/test 与钩子脚本自身(verify 含绝对路径测试数据、install-hooks 内嵌 shebang,避免自匹配);
 // 目录按首段、文件按完整路径精确匹配,防 ../x 误跳
 const SKIP_DIRS = new Set(['node_modules', '.git', '.githooks', 'test'])
 const SKIP_FILES = new Set([
@@ -125,7 +137,7 @@ const SKIP_FILES = new Set([
 // 变长参数:任一命中即跳过。
 // rename 场景下 diff 头为 `a/<旧路径> b/<新路径>`,两侧必须同时参与判定:
 // 迁移期旧名(如 .mjs)不在 SKIP_FILES 而新名在,仅按旧名判断会让本该跳过的文件被扫描,
-// 其内嵌的测试数据(UNC/绝对路径字面量)随即触发误报。
+// 其内嵌的绝对路径字面量随即触发误报。
 function isSkippedPath(...files) {
 	for (const file of files) {
 		if (!file) {
@@ -150,11 +162,15 @@ function isOffendingAddedLine(line) {
 		hasAbsolutePath(line)
 	)
 }
+// diff 新增行是否含非法控制字符或不可见格式字符(排除 +++ 头行;\t 缩进合法)
+function isControlAddedLine(line) {
+	return line.startsWith('+') && !line.startsWith('+++') && BAD_CONTROL.test(line)
+}
 // --- shared snippet end ---
 
 // --- 非共享区:install/verify 共用工具 ---
 // 共享片段区域整体嵌入 .githooks 钩子(纯 JS,不能用 TS 语法),区域内不得出现类型注解;
-// 区域外工具函数可补类型注解,由 tsconfig.scripts.json 校验
+// 区域外工具函数可补类型注解;scripts/ 无 tsconfig 覆盖(tsconfig.json 只含 src,tsconfig.test.json 只含 test)
 function readHookTemplate(name: string, label: string): string {
 	const p = join(dirname(fileURLToPath(import.meta.url)), '..', '.githooks', name)
 	if (!existsSync(p)) {
@@ -192,6 +208,7 @@ export {
 	filterCommitLines,
 	hasAbsolutePath,
 	isOffendingAddedLine,
+	isControlAddedLine,
 	isSkippedPath,
 	tokenHasGlobShape,
 	readHookTemplate,

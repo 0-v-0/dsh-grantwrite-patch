@@ -42,7 +42,7 @@ if (existsSync(gitDir)) {
 const COMMIT_MSG_TEMPLATE = String.raw`
 // node 是原生 Windows 程序,经 #!<node路径> shebang 由 git 直接 CreateProcess,绕过 sh/env
 // (受限沙箱/受限 token 下 sh.exe 因 signal pipe 创建失败,Win32 error 5)
-// 校验 Conventional Commits 与 fixup 目标;拦截机器绝对路径
+// 校验 Conventional Commits 与 fixup 目标;拦截机器绝对路径与控制字符
 // type 限常规集合、可选 scope/(!),描述 \S 开头;fixup 目标为 Conventional 或 ≥7 位短哈希
 import fs from "node:fs";
 
@@ -59,7 +59,12 @@ if (file && fs.existsSync(file)) {
 
 const verdict = checkCommitSubject(lines);
 if (!verdict.pass) {
-	if (verdict.kind === "abs") {
+	if (verdict.kind === "control") {
+		process.stderr.write(
+			"ERROR: commit-msg hook rejected message: ASCII control character in commit message (corrupts git tooling):\n" +
+				"  line: " + verdict.hit + "\n",
+		);
+	} else if (verdict.kind === "abs") {
 		process.stderr.write(
 			"ERROR: commit-msg hook rejected message: absolute path in commit message leaks machine/user info (replace with ./ or ~):\n" +
 				"  " + verdict.hit + "\n",
@@ -86,8 +91,8 @@ process.exit(0);
 const PRE_COMMIT_TEMPLATE = String.raw`
 // sh.exe 依赖 signal pipe(cygwin fork),受限沙箱下创建失败;node 经 #!<node路径> shebang 由 git 直接 CreateProcess 绕过 sh/env
 // 钩子内调 git 避开 stdio pipe(受限环境 EPERM),改用文件句柄继承捕获输出
-// 扫描暂存内容中 ^+ 开头的行,拦截绝对路径
-// 两阶段:1) 扫描暂存 ^+ 行拦截绝对路径;2) oxlint 检查暂存源码(.oxlintrc.staged.json,typeAware=false)
+// 扫描暂存内容中 ^+ 开头的行,拦截绝对路径与控制字符
+// 两阶段:1) 扫描暂存 ^+ 行拦截绝对路径与控制字符;2) oxlint 检查暂存源码(.oxlintrc.staged.json,typeAware=false)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -128,7 +133,7 @@ function git(args) {
 	return spawnOut("git", args, process.cwd());
 }
 
-// 单次调用取全部暂存 diff(--no-color),按 hunk 头归并到文件;仍只扫 ^+ 变更行
+// 单次调用取全部暂存 diff(--no-color),按 "diff --git" 文件头归并到文件;仍只扫 ^+ 变更行
 // 单次调用省 N-1 次进程启动(Windows ~70ms/次);扫描量恒为变更行,大文件不退化
 const diff = git(["diff", "--cached", "--no-color"]);
 if (diff.error) {
@@ -141,10 +146,15 @@ let failMsg = "";
 let current = null
 const flusher = (target) => {
 	if (current && (target === null || target !== current.file)) {
-		const offending = current.lines.filter((line) => isOffendingAddedLine(line));
-		if (offending.length > 0) {
+		const absOffending = current.lines.filter((line) => isOffendingAddedLine(line));
+		if (absOffending.length > 0) {
 			exitCode = 1;
-			failMsg += "\n\n  " + current.file + ":\n" + offending.join("\n");
+			failMsg += "\n\n  [abs] " + current.file + ":\n" + absOffending.join("\n");
+		}
+		const ctlOffending = current.lines.filter((line) => isControlAddedLine(line));
+		if (ctlOffending.length > 0) {
+			exitCode = 1;
+			failMsg += "\n\n  [control] " + current.file + ":\n" + ctlOffending.join("\n");
 		}
 		current = null;
 	}
@@ -167,16 +177,22 @@ for (const line of diff.out.split(/\r?\n/)) {
 flusher(null);
 
 if (exitCode !== 0) {
-	process.stderr.write("ERROR: pre-commit hook detected absolute paths in staged changes:");
-	process.stderr.write(failMsg + "\n\n");
-	process.stderr.write("Absolute paths leak machine/user info and are non-portable.\n");
-	process.stderr.write("Replace them with project-relative paths (./) or home placeholders (~).\n");
+	const hasAbs = failMsg.indexOf("[abs]") !== -1;
+	const hasCtl = failMsg.indexOf("[control]") !== -1;
+	let head = "";
+	if (hasAbs) {
+		head += "ERROR: pre-commit hook detected absolute paths in staged changes (leak machine/user info; replace with ./ or ~):\n";
+	}
+	if (hasCtl) {
+		head += "ERROR: pre-commit hook detected control or invisible-format characters in staged changes (C0 except \\t\\n\\r plus DEL, and zero-width/bidi Unicode corrupt files; remove them before committing):\n";
+	}
+	process.stderr.write(head + failMsg + "\n");
 	process.exit(1);
 }
 // 阶段 2:oxlint 检查暂存源码(轻量配置 .oxlintrc.staged.json,typeAware=false,
 // 避免全量类型程序图开销;仅 lint 新提交的源码文件,成功静默)
 // 显式传文件列表而非 --staged:扩展名过滤在钩子内完成,oxlint 再应用配置 ignorePatterns
-// (ignorePatterns 继承自主配置 .oxlintrc.json,已排除 *.js/*.mjs/*.cjs/*.config.ts、lib/dist/docs/profiles/.dsh-smoke)
+// (ignorePatterns 由 .oxlintrc.staged.json 自己声明:*.js/*.mjs/*.cjs/*.config.ts、lib/node_modules/.dsh-smoke/dist/docs;父配置另含 **/profiles/**)
 const OXLINT_BIN = path.join(process.cwd(), "node_modules", "oxlint", "bin", "oxlint");
 const OXLINT_CONFIG = path.join(process.cwd(), ".oxlintrc.staged.json");
 const LINT_EXT = /\.(?:ts|mts|cts|tsx|jsx|vue)$/;
@@ -212,12 +228,12 @@ process.exit(0);
 
 // 展开占位符;未知 region 抛错提示检查标记拼写
 function expandTemplate(tpl, name) {
-	return tpl.replace(/\/\*@HOOK_SHARED:([A-Za-z]+)@\*\//g, (_m0, region) => {
+	return tpl.replaceAll(/\/\*@HOOK_SHARED:([A-Za-z]+)@\*\//g, (_m0, region) => {
 		try {
 			return readSharedSnippet(region)
-		} catch (err) {
+		} catch (e) {
 			throw new Error(
-				`[install-hooks] 未知的共享片段占位符: ${region}(${name})(检查 install-hooks.ts 与 hook-logic.ts 的标记拼写一致): ${err.message}`,
+				`[install-hooks] 未知的共享片段占位符: ${region}(${name})(检查 install-hooks.ts 与 hook-logic.ts 的标记拼写一致): ${e.message}`,
 			)
 		}
 	})
@@ -254,7 +270,9 @@ for (const [name, tpl] of HOOK_CONFIGS) {
 		const existingFirstLine = nl === -1 ? existing : existing.slice(0, nl)
 		const existingBody = nl === -1 ? '' : existing.slice(nl + 1)
 		// 正文与 shebang 均一致即视为最新;否则按模板重写
-		if (existingBody === body && existingFirstLine === shebang) continue
+		if (existingBody === body && existingFirstLine === shebang) {
+			continue
+		}
 	}
 	writeGeneratedHook(outPath, expectedContent)
 }
