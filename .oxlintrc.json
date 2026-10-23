@@ -1,9 +1,29 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"plugins": ["import", "unicorn", "oxc"],
+	"plugins": ["import", "unicorn", "oxc", "typescript"],
 	"categories": {
 		"correctness": "off"
 	},
+	// JS plugins are currently in alpha (oxlint >= 1.57); the API is
+	// compatible with ESLint v9+. The plugin name "unicorn" of
+	// eslint-plugin-unicorn collides with the built-in Rust unicorn plugin
+	// (reserved-name error), so it is loaded under the alias unicorn-js.
+	"jsPlugins": [
+		{ "name": "unicorn-js", "specifier": "eslint-plugin-unicorn" },
+		// sonarjs: deterministic code-quality rules (traditional visitor
+		// pattern; rules using context.on were excluded as they don't fire
+		// under oxlint). Only rules verified to fire are included.
+		{ "name": "sonarjs", "specifier": "eslint-plugin-sonarjs" },
+		// regexp: deterministic regex lint (traditional visitor pattern, no
+		// context.on). Only rules verified to fire are included.
+		{ "name": "regexp", "specifier": "eslint-plugin-regexp" },
+		// n: Node.js-specific rules (traditional visitor pattern). Only
+		// handle-callback-err fires under oxlint (verified).
+		{ "name": "n", "specifier": "eslint-plugin-n" },
+		// Custom rule: require template literals only for chained string
+		// concatenation (2+ `+`), exempting single-`+` joins
+		{ "name": "prefer-template-multi", "specifier": "./scripts/oxlint-plugins/prefer-template-multi.ts" }
+	],
 	"options": {
 		"reportUnusedDisableDirectives": "warn",
 		"typeAware": true
@@ -31,16 +51,17 @@
 		"curly": "warn",
 		"no-useless-computed-key": "warn",
 		"object-shorthand": "warn",
-		"prefer-template": "warn",
 		"prefer-object-spread": "warn",
 		"sort-keys": "warn",
-		"unicorn/switch-case-braces": "warn",
+		"unicorn/switch-case-braces": ["warn", "avoid"],
 		"unicorn/no-nested-ternary": "warn",
 		"unicorn/consistent-template-literal-escape": "warn",
+		// see scripts/oxlint-plugins/prefer-template-multi.ts.
+		"prefer-template-multi/prefer-template": "warn",
 		// Canonical branch shape: when there is exactly one idiomatic way to
 		// write a branch, two people extending the same if/switch produce the
 		// same shape, and the merge stays a textual one.
-		"no-else-return": "warn",
+		"unicorn-js/no-useless-else": "warn",
 		"no-unneeded-ternary": "warn",
 		"operator-assignment": "warn",
 		// Object-only: array destructuring is often positional and rewriting it
@@ -63,11 +84,11 @@
 		// Size limits: conflicts are a function of how many people touch the
 		// same region, so keep units small enough to be owned by one change.
 		// Warn-only nudges toward splitting, not CI gates.
-		"max-lines": ["warn", { "max": 400, "skipBlankLines": true, "skipComments": true }],
+		"max-lines": ["warn", { "max": 500, "skipBlankLines": true, "skipComments": true }],
 		"max-lines-per-function": ["warn", { "max": 80, "skipBlankLines": true, "skipComments": true }],
 		"max-depth": ["warn", { "max": 4 }],
 		"max-params": ["warn", { "max": 5 }],
-		"complexity": ["warn", { "max": 15 }],
+		"complexity": ["warn", { "max": 20 }],
 		"max-classes-per-file": ["warn", 1],
 		// Coupling: a file that imports half the repo is a file everyone edits.
 		"import/max-dependencies": ["warn", { "max": 15 }],
@@ -76,6 +97,13 @@
 		// that every branch has to edit, which is the opposite of the goal.
 		"import/no-mutable-exports": "warn",
 		"unicorn/prefer-export-from": "warn",
+		"unicorn/error-message": "warn",
+		"unicorn/new-for-builtins": "warn",
+		"unicorn/no-this-assignment": "warn",
+		"unicorn/prefer-includes": "warn",
+		"unicorn/prefer-node-protocol": "warn",
+		"unicorn/prefer-type-error": "warn",
+		"unicorn/catch-error-name": ["warn", { "name": "e" }],
 		// File identity: one convention means one name per file, so two branches
 		// cannot land `fooBar.ts` and `foo-bar.ts` side by side, and renames
 		// (the change git merges worst) stop being a matter of taste. Verified:
@@ -94,11 +122,131 @@
 		"prefer-set-has": "warn",
 		// These two tsgolint rules require type-aware checking with
 		// strictNullChecks (tsconfig.json: strictNullChecks: true, strict:
-		// false). They are off at the top level (applies outside the type-aware
-		// src override) and re-enabled as error in the src override below for
-		// the plugin source.
-		"typescript/no-unnecessary-boolean-literal-compare": "off",
-		"typescript/no-useless-default-assignment": "off"
+		// false). Warn at the top level (applies to the whole repo), re-enabled
+		// as error in the src override below for the plugin source.
+		"typescript/no-unnecessary-boolean-literal-compare": "warn",
+		"typescript/no-useless-default-assignment": "warn",
+		// ── Type-aware rules ──
+		// Deterministic checks backed by the type checker (low false-positive
+		// rate) that also shrink diffs: they remove redundant code instead of
+		// restyling it. Warn-only repo-wide; the src override keeps them at
+		// error for the plugin source.
+		"typescript/await-thenable": "warn",
+		"typescript/no-base-to-string": "warn",
+		"typescript/no-confusing-void-expression": "warn",
+		"typescript/no-floating-promises": "warn",
+		"typescript/no-for-in-array": "warn",
+		"typescript/no-meaningless-void-operator": "warn",
+		"typescript/no-misused-promises": "warn",
+		"typescript/no-misused-spread": "warn",
+		"typescript/no-this-alias": "warn",
+		"typescript/no-unnecessary-template-expression": "warn",
+		"typescript/no-unnecessary-type-arguments": "warn",
+		"typescript/no-unnecessary-type-assertion": "warn",
+		"typescript/no-unnecessary-type-constraint": "warn",
+		"typescript/no-unnecessary-type-conversion": "warn",
+		"typescript/no-unnecessary-type-parameters": "warn",
+		"typescript/prefer-return-this-type": "warn",
+		"typescript/return-await": ["warn", "error-handling-correctness-only"],
+		"typescript/unbound-method": "warn",
+		// ── Unicorn JS-plugin rules (via unicorn-js alias) ──
+		// Subset of eslint-plugin-unicorn not yet implemented natively in oxlint,
+		// selected for: deterministic detection (few false positives), no DOM/Node
+		// environment requirements, no type-aware analysis, and a canonical output
+		// shape that keeps merge conflicts low. All warn-only like the rest of the
+		// conflict-minimizing set.
+		"unicorn-js/logical-assignment-operators": "warn",
+		"unicorn-js/no-chained-comparison": "warn",
+		"unicorn-js/no-duplicate-if-branches": "warn",
+		"unicorn-js/no-duplicate-logical-operands": "warn",
+		"unicorn-js/no-duplicate-set-values": "warn",
+		"unicorn-js/no-impossible-length-comparison": "warn",
+		"unicorn-js/no-misrefactored-assignment": "warn",
+		"unicorn-js/no-named-default": "warn",
+		"unicorn-js/no-negated-array-predicate": "warn",
+		"unicorn-js/no-redundant-comparison": "warn",
+		"unicorn-js/no-return-array-push": "warn",
+		"unicorn-js/no-subtraction-comparison": "warn",
+		"unicorn-js/no-unnecessary-array-flat-map": "warn",
+		"unicorn-js/no-unnecessary-boolean-comparison": "warn",
+		"unicorn-js/no-unnecessary-splice": "warn",
+		"unicorn-js/no-useless-boolean-cast": "warn",
+		"unicorn-js/no-useless-coercion": "warn",
+		"unicorn-js/no-useless-compound-assignment": "warn",
+		"unicorn-js/no-useless-concat": "warn",
+		"unicorn-js/no-useless-continue": "warn",
+		"unicorn-js/no-useless-delete-check": "warn",
+		"unicorn-js/no-useless-logical-operand": "warn",
+		"unicorn-js/no-useless-override": "warn",
+		"unicorn-js/no-useless-recursion": "warn",
+		"unicorn-js/prefer-array-from-map": "warn",
+		"unicorn-js/prefer-array-some": "warn",
+		"unicorn-js/prefer-combined-guards": "warn",
+		"unicorn-js/prefer-simple-sort-comparator": "warn",
+		"unicorn-js/prefer-type-literal-last": "warn",
+		"unicorn/prefer-array-index-of": "warn",
+		// ── New-project rules (greenfield baseline; no migration cost) ──
+		"unicorn-js/prefer-early-return": "warn",
+		"unicorn-js/prefer-while-loop-condition": "warn",
+		"unicorn-js/no-duplicate-loops": "warn",
+		"unicorn-js/no-lonely-if": "warn",
+		"unicorn-js/prefer-logical-operator-over-ternary": "warn",
+		"unicorn-js/no-array-sort-for-min-max": "warn",
+		"unicorn-js/prefer-array-iterable-methods": "warn",
+		"unicorn-js/prefer-array-last-methods": "warn",
+		"unicorn-js/prefer-string-replace-all": "warn",
+		// ── eslint-config-simplesense subset (JS-plugin rules) ──
+		// General-purpose: deterministic detection, no DOM/Node env, low false
+		// positives. Rules from simplesense's unicorn set not in oxlint's
+		// built-in Rust unicorn.
+		"unicorn-js/no-accessor-recursion": "warn",
+		"unicorn-js/no-array-method-this-argument": "warn",
+		"unicorn-js/no-new-array": "warn",
+		"unicorn-js/no-new-buffer": "warn",
+		"unicorn-js/no-single-promise-in-promise-methods": "warn",
+		"unicorn-js/no-typeof-undefined": "warn",
+		"unicorn-js/no-unnecessary-slice-end": "warn",
+		"unicorn-js/no-useless-promise-resolve-reject": "warn",
+		"unicorn-js/prefer-date-now": "warn",
+		"unicorn-js/prefer-number-properties": "warn",
+		"unicorn-js/prefer-regexp-test": "warn",
+		"unicorn-js/prefer-string-slice": "warn",
+		"unicorn-js/prefer-string-starts-ends-with": "warn",
+		"unicorn-js/prefer-string-trim-start-end": "warn",
+		"unicorn-js/require-number-to-fixed-digits-argument": "warn",
+		// ── eslint-config-simplesense subset (sonarjs + regexp) ──
+		// General-purpose: deterministic code-quality rules that catch bugs
+		// (duplicate branches, identical conditions, element overwrite, etc.).
+		"sonarjs/no-collapsible-if": "warn",
+		"sonarjs/no-collection-size-mischeck": "warn",
+		"sonarjs/no-duplicated-branches": "warn",
+		"sonarjs/no-element-overwrite": "warn",
+		"sonarjs/no-extra-arguments": "warn",
+		"sonarjs/no-gratuitous-expressions": "warn",
+		"sonarjs/no-identical-conditions": "warn",
+		"sonarjs/no-identical-expressions": "warn",
+		"sonarjs/no-nested-switch": "warn",
+		"sonarjs/no-redundant-jump": "warn",
+		"sonarjs/no-small-switch": "warn",
+		"sonarjs/no-useless-catch": "warn",
+		"sonarjs/prefer-immediate-return": "warn",
+		"sonarjs/prefer-while": "warn",
+		// These need explicit options (oxlint passes no defaults).
+		"sonarjs/max-switch-cases": ["warn", 30],
+		"sonarjs/no-identical-functions": ["warn", 3],
+		// regexp: deterministic regex bugs (duplicate chars, useless
+		// quantifiers, suboptimal patterns). All verified to fire.
+		"regexp/no-dupe-characters-character-class": "warn",
+		"regexp/no-dupe-disjunctions": "warn",
+		"regexp/no-empty-alternative": "warn",
+		"regexp/no-useless-quantifier": "warn",
+		"regexp/optimal-quantifier-concatenation": "warn",
+		"regexp/prefer-character-class": "warn",
+		"regexp/prefer-d": "warn",
+		"regexp/prefer-quantifier": "warn",
+		// ── eslint-config-simplesense subset (n plugin) ──
+		// Only handle-callback-err fires under oxlint (verified).
+		"n/handle-callback-err": "warn"
 	},
 	"ignorePatterns": [
 		"**/lib/**",

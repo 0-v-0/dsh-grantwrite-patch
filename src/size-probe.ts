@@ -31,7 +31,9 @@ export async function probeWorkspaceSize(
 	let objects = 0
 	let timedOut = false
 	const walk = async (dir: string): Promise<boolean> => {
-		if (timedOut) {return true}
+		if (timedOut) {
+			return true
+		}
 		let handle
 		try {
 			handle = await opendir(dir)
@@ -40,11 +42,15 @@ export async function probeWorkspaceSize(
 		}
 		try {
 			for await (const entry of handle) {
-				if (timedOut) {return true}
+				if (timedOut) {
+					return true
+				}
 				objects += 1
-				if (objects >= threshold) {return true}
-				if (entry.isDirectory()) {
-					if (await walk(path.join(dir, entry.name))) {return true}
+				if (objects >= threshold) {
+					return true
+				}
+				if (entry.isDirectory() && (await walk(path.join(dir, entry.name)))) {
+					return true
 				}
 			}
 			return false
@@ -60,7 +66,9 @@ export async function probeWorkspaceSize(
 	}, timeoutMs)
 
 	try {
-		if (await walk(root)) {return { large: true, objects: threshold }}
+		if (await walk(root)) {
+			return { large: true, objects: threshold }
+		}
 		return { large: false, objects }
 	} finally {
 		clearTimeout(timer)
