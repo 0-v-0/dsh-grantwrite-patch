@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
-import path from 'node:path'
+import path, { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
@@ -37,6 +37,65 @@ test('resolveConfig defaults: mode auto, threshold 20000, probe windows', () => 
 	assert.equal(over.objectThreshold, 1000)
 	assert.equal(over.probeTimeoutMs, 5)
 	assert.equal(over.probeCooldownMs, 7)
+})
+
+test('decideWorkspace: Low-label relink fires for workspaces with node_modules, then cools down', async () => {
+	const dir = mkdtempSync(join(os.tmpdir(), 'dsh-rl-'))
+	try {
+		mkdirSync(join(dir, 'node_modules'), { recursive: true })
+		writeFileSync(join(dir, 'node_modules', 'x.dll'), 'x')
+		const opts = resolveConfig({ probeCooldownMs: 60000, relinkCooldownMs: 60000 })
+		const state = makeRecoveryState()
+		let relinks = 0
+		const base = {
+			deepRunner: deepStub,
+			labelProbe: () => false,
+			probe: async () => ({ large: false, objects: 1 }),
+			relinker: async () => {
+				relinks += 1
+				return { fixed: [], skipped: 0 }
+			},
+			runner: async () => ({ ok: true }),
+		}
+		await decideWorkspace(dir, opts, state, base)
+		await wait(10)
+		assert.equal(relinks, 1)
+		// Cooldown suppresses a second relink within the window.
+		await decideWorkspace(dir, opts, state, base)
+		await wait(10)
+		assert.equal(relinks, 1)
+		// Expired cooldown -> relink again.
+		const opts2 = resolveConfig({ probeCooldownMs: 60000, relinkCooldownMs: 5 })
+		const state2 = makeRecoveryState()
+		await decideWorkspace(dir, opts2, state2, base)
+		await wait(10)
+		assert.equal(relinks, 2)
+		// lowLabelRepair off -> never fires.
+		const opts3 = resolveConfig({ lowLabelRepair: false, probeCooldownMs: 60000 })
+		await decideWorkspace(dir, opts3, makeRecoveryState(), base)
+		await wait(10)
+		assert.equal(relinks, 2)
+	} finally {
+		rmSync(dir, { force: true, recursive: true })
+	}
+})
+
+test('decideWorkspace: relink never fires without node_modules', async () => {
+	const opts = resolveConfig({})
+	const state = makeRecoveryState()
+	let relinks = 0
+	await decideWorkspace('R', opts, state, {
+		deepRunner: deepStub,
+		labelProbe: () => false,
+		probe: async () => ({ large: false, objects: 1 }),
+		relinker: async () => {
+			relinks += 1
+			return { fixed: [], skipped: 0 }
+		},
+		runner: async () => ({ ok: true }),
+	})
+	await wait(10)
+	assert.equal(relinks, 0)
 })
 
 test('decideWorkspace: strict label -> no probe, no repair', async () => {
