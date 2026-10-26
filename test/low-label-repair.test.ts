@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
 	filterLowLabel,
@@ -11,6 +10,7 @@ import {
 	relinkNodeModules,
 	repairStore,
 } from '../src/low-label-repair.ts'
+import { SCRATCH_ROOT } from './scratch.ts'
 
 /** A real PE-ish payload so repairStore's PE gate passes. */
 function pePayload(): Buffer {
@@ -63,7 +63,7 @@ test('hardlinkTargets: fsutil volume-relative lines resolved to drive paths', ()
 })
 
 test('relinkNodeModules: labeled native re-linked to clean store inode', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const storeDir = join(dir, 'store')
 		const storeFile = join(storeDir, 'obj1')
@@ -103,7 +103,7 @@ test('relinkNodeModules: labeled native re-linked to clean store inode', async (
 })
 
 test('relinkNodeModules: store target still labeled -> skipped, next pass converges', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const storeDir = join(dir, 'store')
 		const storeFile = join(storeDir, 'obj1')
@@ -138,7 +138,7 @@ test('relinkNodeModules: store target still labeled -> skipped, next pass conver
 })
 
 test('relinkNodeModules: labeled node_modules dir -> blocked, no relink', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const nm = join(dir, 'repo', 'node_modules')
 		mkdirSync(nm, { recursive: true })
@@ -154,7 +154,7 @@ test('relinkNodeModules: labeled node_modules dir -> blocked, no relink', async 
 })
 
 test('relinkNodeModules: store located by content-addressed pattern, no storeDirs needed', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		// Simulated pnpm store layout on an arbitrary volume (64-hex content id).
 		const storeFile =
@@ -196,7 +196,7 @@ test('isStorePath: content-addressed pattern vs workspace paths', () => {
 })
 
 test('repairStore: reverse-maps labeled repo native to store, swaps PE inode', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const storeDir = join(dir, 'store')
 		const storeFile = join(storeDir, 'obj1')
