@@ -80,7 +80,8 @@ const rule = {
 		},
 		fixable: 'code',
 		messages: {
-			preferTemplate: 'Use a template literal instead of concatenating {{count}} parts with `+`.',
+			preferTemplate:
+				'Use a template literal instead of concatenating {{count}} parts with `+`.',
 		},
 		type: 'suggestion',
 	},

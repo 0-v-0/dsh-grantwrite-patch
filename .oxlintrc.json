@@ -56,6 +56,7 @@
 		"unicorn/switch-case-braces": ["warn", "avoid"],
 		"unicorn/no-nested-ternary": "warn",
 		"unicorn/consistent-template-literal-escape": "warn",
+		"typescript/array-type": ["warn", { "default": "array" }],
 		// see scripts/oxlint-plugins/prefer-template-multi.ts.
 		"prefer-template-multi/prefer-template": "warn",
 		// Canonical branch shape: when there is exactly one idiomatic way to
@@ -387,14 +388,13 @@
 		},
 		{
 			// Type-level spelling consistency. The same type written two ways
-			// (`T[]` vs `Array<T>`, `interface` vs `type`, `Record<K, V>` vs
-			// `{ [k: K]: V }`, `{ (): void }` vs `() => void`) is a purely
-			// cosmetic diff that still collides with real changes on merge,
-			// and it silently spreads via copy-paste.
+			// (`interface` vs `type`, `Record<K, V>` vs `{ [k: K]: V }`,
+			// `{ (): void }` vs `() => void`) is a purely cosmetic diff that
+			// still collides with real changes on merge, and it silently spreads
+			// via copy-paste. array-type is top-level so scripts/ gets it too.
 			"files": ["src/**/*.{ts,tsx}"],
 			"plugins": ["typescript"],
 			"rules": {
-				"typescript/array-type": ["warn", { "default": "array-simple" }],
 				"typescript/consistent-type-definitions": ["warn", "interface"],
 				"typescript/consistent-indexed-object-style": ["warn", "record"],
 				"typescript/consistent-type-assertions": ["warn", { "assertionStyle": "as" }],
