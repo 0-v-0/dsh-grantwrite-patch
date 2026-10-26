@@ -41,7 +41,14 @@ import type {
 } from './types.ts'
 import { installPatch, loadPreload } from './patch.ts'
 import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
-import { repairCapabilityTree, repairCapabilityTreeDeep, type CapabilityRepairOutcome } from './capability-repair.ts'
+import type { CapabilityRepairOutcome } from './capability-repair.ts'
+import { defaultRepoRoots, defaultStoreDirs, type LowLabelOutcome } from './low-label-repair.ts'
+import {
+	backfillCapabilitySids,
+	scheduleDeepScan,
+	scheduleRelink,
+	scheduleStoreRepair,
+} from './background.ts'
 
 export const name = 'dsh-grantwrite-patch'
 export const inject = { shell: null } // optional: no shell composition -> inert
@@ -148,6 +155,7 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 		deepScan: true,
 		enable: true,
 		grantFallback: true,
+		lowLabelRepair: true,
 		maxRetries: 1,
 		mode: 'auto',
 		objectThreshold: 20000,
@@ -156,8 +164,12 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 		outDir: path.join(resolveDshHome(), 'grantwrite-patch'),
 		probeCooldownMs: 3600000,
 		probeTimeoutMs: 10000,
+		relinkCooldownMs: 60000,
 		repairTimeoutMs: 120000,
+		repoScanRoots: defaultRepoRoots(),
 		scriptPath: resolveSandboxScript() ?? '',
+		storeDirs: defaultStoreDirs(),
+		storeFullScan: false,
 		...config,
 	}
 }
@@ -365,6 +377,10 @@ export interface RecoveryState {
 	deepScanned: Map<string, number>
 	// One in-flight background deep scan per root; concurrent calls share it.
 	deepInFlight: Map<string, Promise<void>>
+	// Last Low-label node_modules relink timestamp per root.
+	relinked: Map<string, number>
+	// One in-flight relink per root; concurrent calls share it.
+	relinkInFlight: Map<string, Promise<void>>
 }
 
 export function makeRecoveryState(): RecoveryState {
@@ -375,6 +391,8 @@ export function makeRecoveryState(): RecoveryState {
 		deepScanned: new Map(),
 		inflight: new Map(),
 		lastRepair: new Map(),
+		relinkInFlight: new Map(),
+		relinked: new Map(),
 	}
 }
 
@@ -422,6 +440,10 @@ export interface ApplyDeps {
 	/** Background full-tree capability back-fill; tests stub this to avoid
 	 * real icacls /T spawns. Defaults to repairCapabilityTreeDeep. */
 	deepRunner?: (root: string, opts: { timeoutMs?: number }) => Promise<CapabilityRepairOutcome>
+	/** Low-label node_modules relink; tests stub this. Defaults to relinkNodeModules. */
+	relinker?: (root: string, opts?: {}) => Promise<LowLabelOutcome>
+	/** Background store repair; tests stub this. Defaults to repairStore. */
+	storeRepairer?: (opts?: {}) => Promise<LowLabelOutcome>
 }
 
 /**
@@ -446,54 +468,12 @@ export async function decideWorkspace(
 		return
 	}
 
-	// Capability-SID backfill for pre-existing hardened subdirs (dsh #423/#9559).
-	// The delete/write deny is a DACL artifact (world Deny FILE_DELETE_CHILD),
-	// unrelated to the Low label — so it must run even in a strict environment
-	// where grantWrite succeeds with the label. Own cooldown; never throws.
-	try {
-		const lastCap = state.capabilityRepaired.get(root)
-		if (lastCap === undefined || now - lastCap >= opts.probeCooldownMs) {
-			repairCapabilityTree(root, { timeoutMs: opts.repairTimeoutMs })
-			state.capabilityRepaired.set(root, Date.now())
-		}
-	} catch {
-		// best-effort: the FFI patch still carries the command either way
-	}
-
-	// Background deep scan (fix-delete-acl.ts --all equivalent): walk the whole
-	// tree with icacls /T (async) and back-fill hardened subdirs at any depth —
-	// node_modules/.git internals included. Fire-and-forget so the command path
-	// is never blocked by the /T walk; one run per root per probeCooldownMs.
-	if (opts.deepScan) {
-		const lastDeep = state.deepScanned.get(root)
-		if (
-			!state.deepInFlight.has(root) &&
-			(lastDeep === undefined || now - lastDeep >= opts.probeCooldownMs)
-		) {
-			const deep = (hooks.deepRunner ?? repairCapabilityTreeDeep)(root, {
-				timeoutMs: opts.repairTimeoutMs,
-			})
-				.then((outcome) => {
-					state.deepScanned.set(root, Date.now())
-					if (outcome.error) {
-						console.warn(
-							`[dsh-grantwrite-patch] deep capability backfill ${root} failed: ${outcome.error}`,
-						)
-					} else if (outcome.fixed.length > 0) {
-						console.log(
-							`[dsh-grantwrite-patch] deep capability backfill ${root}: fixed ${outcome.fixed.length} dir(s), skipped ${outcome.skipped}`,
-						)
-					}
-				})
-				.catch(() => {
-					// best-effort: never let the background scan surface
-				})
-				.finally(() => {
-					state.deepInFlight.delete(root)
-				})
-			state.deepInFlight.set(root, deep)
-		}
-	}
+	// Background passes first (see background.ts): none may block the command
+	// path, and the capability back-fill is label-independent (dsh #423/#9559),
+	// so it must run even in a strict environment.
+	backfillCapabilitySids(root, opts, state, now)
+	scheduleDeepScan(root, opts, state, hooks, now)
+	scheduleRelink(root, opts, state, hooks, now)
 
 	let label: boolean | null = null
 	try {
@@ -507,20 +487,27 @@ export async function decideWorkspace(
 		return
 	}
 
-	let large = false
-	try {
-		;({ large } = await probe(root, opts.objectThreshold, opts.probeTimeoutMs))
-	} catch {
-		large = false
-	}
-
-	if (large) {
+	if (await isLargeWorkspace(probe, root, opts)) {
 		// Persistent repair (user FullControl ACE) turns the workspace strict, so
 		// later restarts skip the full-tree propagation. Best-effort: a failed
 		// repair leaves the FFI patch to carry the degraded path.
 		await repairAcl(root, opts, state, runner)
 	}
 	state.decided.set(root, Date.now())
+}
+
+/** Size probe wrapped so a throwing/failing probe reads as "small" (skip). */
+async function isLargeWorkspace(
+	probe: SizeProbe,
+	root: string,
+	opts: ResolvedConfig,
+): Promise<boolean> {
+	try {
+		const { large } = await probe(root, opts.objectThreshold, opts.probeTimeoutMs)
+		return large
+	} catch {
+		return false
+	}
 }
 
 /** Annotate a Win32Error with the repair summary for a persistent failure. */
@@ -572,18 +559,27 @@ async function repairAndRetry(
 	}
 }
 
+/**
+ * Pick the shell call to wrap: native hosts (dsh-pwsh-local/-sandbox,
+ * dsh-bash-local/-sandbox) expose execute() and provisioning failures reject
+ * it; older compositions may expose a run() convenience instead.
+ */
+function shellMethodName(shell: NonNullable<CtxLike['shell']>): 'execute' | 'run' | undefined {
+	if (typeof shell.execute === 'function') {
+		return 'execute'
+	}
+	if (typeof shell.run === 'function') {
+		return 'run'
+	}
+	return undefined
+}
+
 export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps = {}): void {
 	const { shell } = ctx
 	if (!shell) {
 		return
 	}
-	// Native hosts (dsh-pwsh-local/-sandbox, dsh-bash-local/-sandbox) expose
-	// execute() and provisioning failures reject it; older compositions may
-	// expose a run() convenience instead. Wrap whichever exists.
-	const method: 'execute' | 'run' | undefined =
-		typeof shell.execute === 'function'
-			? 'execute'
-			: (typeof shell.run === 'function' ? 'run' : undefined)
+	const method = shellMethodName(shell)
 	if (method === undefined) {
 		return
 	}
@@ -591,6 +587,10 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 	if (!opts.enable) {
 		return
 	}
+	// Background store repair (once per plugin start): reverse-map labeled
+	// native binaries in the pnpm store and swap their inodes so future
+	// installs link clean files. Fire-and-forget; must never block startup.
+	scheduleStoreRepair(opts, deps)
 	const orig = (shell[method] as (spec: ShellSpec) => Promise<unknown>).bind(shell)
 	const state = makeRecoveryState()
 	const runner = deps.runner ?? runRepair
@@ -604,45 +604,78 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 		installPatch()
 	}
 
-	shell[method] = async (spec: ShellSpec): Promise<unknown> => {
-		if (opts.mode === 'auto') {
+	shell[method] = wrapShell(orig, { opts, runner, state }, { labelProbe, probe })
+}
+
+/** Config + per-root state + runner shared by the wrapped command's two paths. */
+interface ShellContext {
+	opts: ResolvedConfig
+	state: RecoveryState
+	runner: RepairRunner
+}
+
+/**
+ * The wrapped command: pre-decide the workspace (auto mode), then carry the
+ * command; on a grantWrite failure repair the ACL and retry invisibly, else
+ * rethrow the original error.
+ */
+function wrapShell(
+	orig: (spec: ShellSpec) => Promise<unknown>,
+	ctx: ShellContext,
+	hooks: { labelProbe: LabelProbe; probe: SizeProbe },
+): (spec: ShellSpec) => Promise<unknown> {
+	return async (spec: ShellSpec): Promise<unknown> => {
+		if (ctx.opts.mode === 'auto') {
 			const root = resolveRoot(spec)
 			if (root !== undefined) {
-				await decideWorkspace(root, opts, state, { labelProbe, probe, runner })
+				await decideWorkspace(root, ctx.opts, ctx.state, { ...hooks, runner: ctx.runner })
 			}
 		}
 		try {
 			return await orig(spec)
 		} catch (e) {
-			if (!isGrantWriteError(e)) {
-				throw e
-			}
-			const root = resolveRoot(spec)
-			if (root === undefined) {
-				throw e
-			}
-
-			const maxRetries = Math.max(0, Math.min(3, opts.maxRetries))
-			const outcome =
-				maxRetries > 0
-					? await repairAndRetry(
-							() => orig(spec),
-							() => repairAcl(root, opts, state, runner),
-							maxRetries,
-							e,
-						)
-					: { err: e }
-			if ('value' in outcome) {
-				return outcome.value
-			}
-			// Persistent grantWrite failure: report it, optionally annotated.
-			if (opts.appendDiagnostics) {
-				const recap = state.lastRepair.has(root)
-					? 'repaired but retry still fails'
-					: 'repair not verified'
-				throw annotateError(outcome.err, root, recap)
-			}
-			throw outcome.err
+			return recoverFromGrantWrite(orig, spec, e, ctx)
 		}
 	}
+}
+
+/**
+ * Error path: repair and retry once the grantWrite failure is recognised.
+ * Non-grantWrite errors (and an unresolvable root) propagate untouched.
+ */
+async function recoverFromGrantWrite(
+	orig: (spec: ShellSpec) => Promise<unknown>,
+	spec: ShellSpec,
+	e: unknown,
+	ctx: ShellContext,
+): Promise<unknown> {
+	if (!isGrantWriteError(e)) {
+		throw e
+	}
+	const root = resolveRoot(spec)
+	if (root === undefined) {
+		throw e
+	}
+
+	const maxRetries = Math.max(0, Math.min(3, ctx.opts.maxRetries))
+	const outcome =
+		maxRetries > 0
+			? await repairAndRetry(
+					() => orig(spec),
+					() => repairAcl(root, ctx.opts, ctx.state, ctx.runner),
+					maxRetries,
+					e,
+				)
+			: { err: e }
+	if ('value' in outcome) {
+		return outcome.value
+	}
+	// Persistent grantWrite failure: report it, optionally annotated.
+	if (ctx.opts.appendDiagnostics) {
+		const recap = ctx.state.lastRepair.has(root)
+			? 'repaired but retry still fails'
+			: 'repair not verified'
+		throw annotateError(outcome.err, root, recap)
+	}
+	throw outcome.err
 }
