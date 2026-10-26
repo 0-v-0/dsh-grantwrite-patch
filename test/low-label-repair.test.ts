@@ -232,3 +232,108 @@ test('repairStore: reverse-maps labeled repo native to store, swaps PE inode', a
 		rmSync(dir, { recursive: true, force: true })
 	}
 })
+
+test('repairStore allFiles: labeled plain .js store inode is repaired too', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	try {
+		const storeDir = join(dir, 'store')
+		const storeFile = join(storeDir, 'obj1')
+		mkdirSync(storeDir, { recursive: true })
+		writeFileSync(storeFile, 'plain javascript payload') // NOT a PE
+
+		const repo = join(dir, 'repos', 'alpha')
+		const nm = join(repo, 'node_modules')
+		mkdirSync(nm, { recursive: true })
+		writeFileSync(join(nm, 'tool.js'), 'plain javascript payload')
+
+		const icacls = (args: string[]): string => {
+			const p = args[0] ?? ''
+			if (p.includes('store')) {
+				return `${p}: Everyone:(R,W,D,DC)\r\nSuccessfully processed 1 files`
+			}
+			return `${p}: Everyone:(R,W,D,DC)\r\n    Mandatory Label\\Low Mandatory Level:(I)(NW)`
+		}
+		const fsutil = (): string => `${storeFile}\r\n`
+
+		const before = statSync(storeFile).ino
+		const outcome = await repairStore({
+			icacls,
+			fsutil,
+			storeDirs: [storeDir],
+			repoScanRoots: [join(dir, 'repos')],
+		})
+		assert.deepEqual(outcome.fixed, [storeFile])
+		assert.notEqual(statSync(storeFile).ino, before)
+		assert.equal(statSync(storeFile).size, 'plain javascript payload'.length)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('relinkNodeModules allFiles: labeled plain .js re-linked to clean store inode', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	try {
+		const storeDir = join(dir, 'store')
+		const storeFile = join(storeDir, 'obj1')
+		mkdirSync(storeDir, { recursive: true })
+		writeFileSync(storeFile, 'plain javascript payload')
+
+		const repo = join(dir, 'repo')
+		const nm = join(repo, 'node_modules')
+		const nmJs = join(nm, 'tool.js')
+		mkdirSync(nm, { recursive: true })
+		writeFileSync(nmJs, 'plain javascript payload')
+
+		const icacls = (args: string[]): string => {
+			const p = args[0] ?? ''
+			if (p === storeFile || p === nm) {
+				return `${p}: Everyone:(R,W,D,DC)\r\nSuccessfully processed 1 files`
+			}
+			return `${p}: Everyone:(R,W,D,DC)\r\n    Mandatory Label\\Low Mandatory Level:(I)(NW)`
+		}
+		const fsutil = (): string => `${storeFile}\r\n`
+
+		const before = statSync(nmJs).ino
+		const outcome = await relinkNodeModules(repo, {
+			icacls,
+			fsutil,
+			storeDirs: [storeDir],
+		})
+		assert.deepEqual(outcome.fixed, [nmJs])
+		assert.equal(outcome.skipped, 0)
+		assert.equal(statSync(nmJs).ino, statSync(storeFile).ino) // shares the clean store inode
+		assert.notEqual(statSync(nmJs).ino, before)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('relinkNodeModules: labeled file without store target swapped in place', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	try {
+		const repo = join(dir, 'repo')
+		const nm = join(repo, 'node_modules')
+		const copied = join(nm, 'copied.ts') // file:/link: dep, copied not hard-linked
+		mkdirSync(nm, { recursive: true })
+		writeFileSync(copied, 'local dependency source')
+
+		const icacls = (args: string[]): string => {
+			const p = args[0] ?? ''
+			if (p === nm) {
+				return `${p}: Everyone:(R,W,D,DC)\r\nSuccessfully processed 1 files`
+			}
+			return `${p}: Everyone:(R,W,D,DC)\r\n    Mandatory Label\\Low Mandatory Level:(I)(NW)`
+		}
+		const fsutil = (): string => '' // no hard-link targets at all
+
+		const before = statSync(copied).ino
+		const outcome = await relinkNodeModules(repo, { icacls, fsutil, storeDirs: [] })
+		assert.deepEqual(outcome.fixed, [copied])
+		assert.equal(outcome.skipped, 0)
+		assert.notEqual(statSync(copied).ino, before) // inode swapped, label dropped
+		assert.equal(statSync(copied).size, 'local dependency source'.length)
+		assert.equal(existsSync(`${copied}.dsh-clean.tmp`), false)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})

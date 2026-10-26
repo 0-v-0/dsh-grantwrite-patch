@@ -54,6 +54,11 @@ export interface LowLabelRepairOptions {
 	repoScanRoots?: string[]
 	/** Also walk every file in every store dir (slow; off by default). */
 	fullScan?: boolean
+	/** Also repair non-native package files (plain .js/.ts etc. labeled store
+	 * inodes) — pnpm hard-links every package file, so a labeled store inode
+	 * breaks any later full-tree removal (pnpm layout migration, rm -rf
+	 * node_modules) in every repo sharing it. Default true. */
+	allFiles?: boolean
 }
 
 const NATIVE_RE = /\.(exe|dll|node)$/i
@@ -107,8 +112,9 @@ export function parseIcaclsBatch(stdout: string): string[] {
 	return hits
 }
 
-/** Native binaries under `root` (node_modules trees); skips noise dirs. */
-export function scanNativeBinaries(root: string): string[] {
+/** All package files under `root` (node_modules trees); nativeOnly skips noise
+ * dirs and keeps only native binaries (legacy behaviour). */
+export function scanNodeModulesFiles(root: string, nativeOnly: boolean): string[] {
 	const out: string[] = []
 	const walk = (dir: string): void => {
 		let entries
@@ -123,13 +129,18 @@ export function scanNativeBinaries(root: string): string[] {
 				if (!SKIP_DIR_RE.test(e.name)) {
 					walk(p)
 				}
-			} else if (NATIVE_RE.test(e.name)) {
+			} else if (!nativeOnly || NATIVE_RE.test(e.name)) {
 				out.push(p)
 			}
 		}
 	}
 	walk(root)
 	return out
+}
+
+/** Native binaries under `root` (node_modules trees); skips noise dirs. */
+export function scanNativeBinaries(root: string): string[] {
+	return scanNodeModulesFiles(root, true)
 }
 
 /** Labeled subset of `paths` via batched icacls. */
@@ -270,6 +281,7 @@ export async function repairStore(opts: LowLabelRepairOptions = {}): Promise<Low
 	const fsutil = opts.fsutil ?? defaultFsutil
 	const storeDirs = opts.storeDirs ?? defaultStoreDirs()
 	const repoRoots = opts.repoScanRoots ?? defaultRepoRoots()
+	const allFiles = opts.allFiles ?? true
 
 	const candidates = new Set<string>()
 	for (const repo of repoRoots) {
@@ -287,13 +299,13 @@ export async function repairStore(opts: LowLabelRepairOptions = {}): Promise<Low
 			if (!existsSync(nm)) {
 				continue
 			}
-			let natives: string[]
+			let files: string[]
 			try {
-				natives = scanNativeBinaries(nm)
+				files = scanNodeModulesFiles(nm, !allFiles)
 			} catch {
 				continue
 			}
-			for (const f of filterLowLabel(natives, icacls)) {
+			for (const f of filterLowLabel(files, icacls)) {
 				for (const t of hardlinkTargets(f, fsutil)) {
 					if (isStorePath(t, storeDirs)) {
 						candidates.add(t)
@@ -313,9 +325,6 @@ export async function repairStore(opts: LowLabelRepairOptions = {}): Promise<Low
 			}
 			for (const name of files) {
 				const p = join(dir, name)
-				if (!isPeFileSync(p)) {
-					continue
-				}
 				if (hasLowLabelSync(p, icacls)) {
 					candidates.add(p)
 				}
@@ -324,7 +333,7 @@ export async function repairStore(opts: LowLabelRepairOptions = {}): Promise<Low
 	}
 
 	for (const p of candidates) {
-		if (!isPeFileSync(p)) {
+		if (!allFiles && !isPeFileSync(p)) {
 			outcome.skipped += 1
 			continue
 		}
@@ -352,6 +361,7 @@ export async function relinkNodeModules(
 	const icacls = opts.icacls ?? defaultIcacls
 	const fsutil = opts.fsutil ?? defaultFsutil
 	const storeDirs = opts.storeDirs ?? defaultStoreDirs()
+	const allFiles = opts.allFiles ?? true
 	const nm = join(root, 'node_modules')
 	if (!existsSync(nm)) {
 		return outcome
@@ -360,17 +370,26 @@ export async function relinkNodeModules(
 		outcome.blocked = true
 		return outcome
 	}
-	let natives: string[]
+	let files: string[]
 	try {
-		natives = scanNativeBinaries(nm)
+		files = scanNodeModulesFiles(nm, !allFiles)
 	} catch {
 		outcome.error = 'node_modules scan failed'
 		return outcome
 	}
-	for (const f of filterLowLabel(natives, icacls)) {
+	for (const f of filterLowLabel(files, icacls)) {
 		const store = hardlinkTargets(f, fsutil).find((t) => isStorePath(t, storeDirs))
 		if (store === undefined) {
-			outcome.skipped += 1
+			// No store hard-link target (file:/link: deps are copied, not
+			// linked): swap the inode in place — copy+rename replaces the
+			// directory entry, so the new file inherits the parent DACL without
+			// the Low label. Only safe for non-shared files; hard-linked store
+			// files take the rm+link path below.
+			if (replaceInode(f)) {
+				outcome.fixed.push(f)
+			} else {
+				outcome.skipped += 1
+			}
 			continue
 		}
 		// Only relink when the store target is already clean (the background
