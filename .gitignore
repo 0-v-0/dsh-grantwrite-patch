@@ -11,9 +11,6 @@ dist
 # Build output
 lib/
 
-# Generated git hooks
-.githooks/
-
 # Editor directories and files
 !.vscode/extensions.json
 .idea
