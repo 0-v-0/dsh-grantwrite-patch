@@ -13,8 +13,8 @@
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
 		"outDir": "lib",
-		"rootDir": "src",
+		"rootDir": ".",
 		"types": ["node"]
 	},
-	"include": ["src"]
+	"include": ["src", "scripts"]
 }
