@@ -27,7 +27,7 @@ test('apply: repair then retry succeeds invisibly', async () => {
 	let repairs = 0
 	apply(
 		ctx,
-		{},
+		{ lowLabelRepair: false },
 		{
 			deepRunner: deepStub,
 			runner: async () => {
@@ -54,7 +54,7 @@ test('apply: repair ok but retry still grantWrite-fails -> annotated error, no l
 	let repairs = 0
 	apply(
 		ctx,
-		{},
+		{ lowLabelRepair: false },
 		{
 			deepRunner: deepStub,
 			runner: async () => {
@@ -81,7 +81,7 @@ test('apply: repair not verified -> no retry, original error propagates', async 
 	const { ctx, count } = makeCtx(() => {
 		throw WIN32_ERR()
 	})
-	apply(ctx, {}, { deepRunner: deepStub, runner: async () => ({ ok: false, recap: '{"nextAction":"stop"}' }) })
+	apply(ctx, { lowLabelRepair: false }, { deepRunner: deepStub, runner: async () => ({ ok: false, recap: '{"nextAction":"stop"}' }) })
 	const spec = { command: 'x', workdir: WS }
 	await assert.rejects(ctx.shell.execute(spec), (e: Error) => e.message.includes('grantWrite'))
 	assert.equal(count(), 1)
@@ -95,7 +95,7 @@ test('apply: unrelated errors are untouched', async () => {
 	let repairs = 0
 	apply(
 		ctx,
-		{},
+		{ lowLabelRepair: false },
 		{
 			deepRunner: deepStub,
 			runner: async () => {
@@ -119,7 +119,7 @@ test('apply: no workspace root in spec -> no repair, error propagates', async ()
 	let repairs = 0
 	apply(
 		ctx,
-		{},
+		{ lowLabelRepair: false },
 		{
 			deepRunner: deepStub,
 			runner: async () => {
@@ -155,7 +155,7 @@ test('apply: run-only shells are wrapped via the run fallback', async () => {
 	const ctx = { shell }
 	apply(
 		ctx,
-		{},
+		{ lowLabelRepair: false },
 		{
 			deepRunner: deepStub,
 			runner: async () => ({

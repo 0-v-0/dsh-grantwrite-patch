@@ -42,9 +42,19 @@ import type {
 import { installPatch, loadPreload } from './patch.ts'
 import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
 import { repairCapabilityTree, repairCapabilityTreeDeep, type CapabilityRepairOutcome } from './capability-repair.ts'
+import {
+	relinkNodeModules,
+	repairStore,
+	defaultStoreDirs,
+	defaultRepoRoots,
+	type LowLabelOutcome,
+} from './low-label-repair.ts'
 
 export const name = 'dsh-grantwrite-patch'
 export const inject = { shell: null } // optional: no shell composition -> inert
+
+// One background store repair per plugin start (see apply()).
+let storeRepairStarted = false
 
 // `SetNamedSecurityInfoW failed (Win32 5): grantWrite` — thrown by
 // AclWriteGrant.add when the workspace DACL cannot take the write grant.
@@ -148,6 +158,7 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 		deepScan: true,
 		enable: true,
 		grantFallback: true,
+		lowLabelRepair: true,
 		maxRetries: 1,
 		mode: 'auto',
 		objectThreshold: 20000,
@@ -156,8 +167,12 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 		outDir: path.join(resolveDshHome(), 'grantwrite-patch'),
 		probeCooldownMs: 3600000,
 		probeTimeoutMs: 10000,
+		relinkCooldownMs: 60000,
 		repairTimeoutMs: 120000,
+		repoScanRoots: defaultRepoRoots(),
 		scriptPath: resolveSandboxScript() ?? '',
+		storeDirs: defaultStoreDirs(),
+		storeFullScan: false,
 		...config,
 	}
 }
@@ -365,6 +380,10 @@ export interface RecoveryState {
 	deepScanned: Map<string, number>
 	// One in-flight background deep scan per root; concurrent calls share it.
 	deepInFlight: Map<string, Promise<void>>
+	// Last Low-label node_modules relink timestamp per root.
+	relinked: Map<string, number>
+	// One in-flight relink per root; concurrent calls share it.
+	relinkInFlight: Map<string, Promise<void>>
 }
 
 export function makeRecoveryState(): RecoveryState {
@@ -375,6 +394,8 @@ export function makeRecoveryState(): RecoveryState {
 		deepScanned: new Map(),
 		inflight: new Map(),
 		lastRepair: new Map(),
+		relinkInFlight: new Map(),
+		relinked: new Map(),
 	}
 }
 
@@ -422,6 +443,10 @@ export interface ApplyDeps {
 	/** Background full-tree capability back-fill; tests stub this to avoid
 	 * real icacls /T spawns. Defaults to repairCapabilityTreeDeep. */
 	deepRunner?: (root: string, opts: { timeoutMs?: number }) => Promise<CapabilityRepairOutcome>
+	/** Low-label node_modules relink; tests stub this. Defaults to relinkNodeModules. */
+	relinker?: (root: string, opts?: {}) => Promise<LowLabelOutcome>
+	/** Background store repair; tests stub this. Defaults to repairStore. */
+	storeRepairer?: (opts?: {}) => Promise<LowLabelOutcome>
 }
 
 /**
@@ -492,6 +517,46 @@ export async function decideWorkspace(
 					state.deepInFlight.delete(root)
 				})
 			state.deepInFlight.set(root, deep)
+		}
+	}
+
+	// Low-label node_modules relink (TS5033 family): re-link labeled native
+	// binaries under <workspace>/node_modules to their clean store inode, so
+	// native build tools (tsgo, esbuild) run at Medium integrity again. Own
+	// cooldown (relinkCooldownMs); fire-and-forget — the command path must not
+	// wait for the fsutil/icacls round-trips. Never throws. Skipped entirely
+	// when the workspace has no node_modules (cheap, keeps tests inert).
+	if (
+		opts.lowLabelRepair &&
+		existsSync(path.join(root, 'node_modules')) &&
+		!state.relinkInFlight.has(root)
+	) {
+		const lastRelink = state.relinked.get(root)
+		if (lastRelink === undefined || now - lastRelink >= opts.relinkCooldownMs) {
+			const relink = (hooks.relinker ?? relinkNodeModules)(root)
+				.then((outcome) => {
+					state.relinked.set(root, Date.now())
+					if (outcome.blocked) {
+						console.warn(
+							`[dsh-grantwrite-patch] node_modules carries the Low label (strict workspace); relink cannot help ${root}`,
+						)
+					} else if (outcome.error) {
+						console.warn(
+							`[dsh-grantwrite-patch] node_modules relink ${root} failed: ${outcome.error}`,
+						)
+					} else if (outcome.fixed.length > 0) {
+						console.log(
+							`[dsh-grantwrite-patch] relinked ${outcome.fixed.length} Low-labeled native(s) in ${root}/node_modules, skipped ${outcome.skipped}`,
+						)
+					}
+				})
+				.catch(() => {
+					// best-effort: never let the relink surface
+				})
+				.finally(() => {
+					state.relinkInFlight.delete(root)
+				})
+			state.relinkInFlight.set(root, relink)
 		}
 	}
 
@@ -590,6 +655,30 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 	const opts = resolveConfig(config)
 	if (!opts.enable) {
 		return
+	}
+	// Background store repair (once per plugin start): reverse-map labeled
+	// native binaries in the pnpm store and swap their inodes so future
+	// installs link clean files. Fire-and-forget; must never block startup.
+	if (opts.lowLabelRepair && process.platform === 'win32' && !storeRepairStarted) {
+		storeRepairStarted = true
+		const storeRun = (deps.storeRepairer ?? repairStore)({
+			storeDirs: opts.storeDirs,
+			repoScanRoots: opts.repoScanRoots,
+			fullScan: opts.storeFullScan,
+		})
+			.then((outcome) => {
+				if (outcome.error) {
+					console.warn(`[dsh-grantwrite-patch] store repair failed: ${outcome.error}`)
+				} else if (outcome.fixed.length > 0) {
+					console.log(
+						`[dsh-grantwrite-patch] store repair: cleaned ${outcome.fixed.length} Low-labeled store inode(s), skipped ${outcome.skipped}`,
+					)
+				}
+			})
+			.catch(() => {
+				// best-effort: a failed store repair never blocks the plugin
+			})
+		void storeRun
 	}
 	const orig = (shell[method] as (spec: ShellSpec) => Promise<unknown>).bind(shell)
 	const state = makeRecoveryState()

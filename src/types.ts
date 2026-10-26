@@ -43,6 +43,8 @@ export interface RepairConfig {
 	maxRetries?: number
 	/** Skip a second repair of the same root within this window (ms). Default 60000. */
 	cooldownMs?: number
+	/** Low-label node_modules relink cooldown per workspace (ms). Default 60000. */
+	relinkCooldownMs?: number
 	/** Append a short diagnosis to the thrown error when the retry still fails. Default true. */
 	appendDiagnostics?: boolean
 	/** When the diagnose script is unavailable (DSH 0.1.7) or fails, fall back to
@@ -54,6 +56,22 @@ export interface RepairConfig {
 	 * depth (the fix-delete-acl.ts --all equivalent) so no manual script is
 	 * needed. Fire-and-forget, per-workspace probeCooldownMs cache. Default true. */
 	deepScan?: boolean
+	/**
+	 * Low-integrity label cascade repair (TS5033 family): at plugin start,
+	 * background-repair labeled native binaries in the pnpm store (reverse
+	 * mapped from repo node_modules via fsutil hardlink list, PE-verified,
+	 * inode-swapped); before each confined command, relink labeled node_modules
+	 * natives to their clean store inode. Default true.
+	 */
+	lowLabelRepair?: boolean
+	/** pnpm store content directories; default: env/`pnpm store path`/common paths. */
+	storeDirs?: string[]
+	/** Roots whose node_modules are reverse-mapped to find store pollution.
+	 * Default: the `repos` sibling convention (a `gh` dir next to the DSH
+	 * install) when present. */
+	repoScanRoots?: string[]
+	/** Also walk every store file (slow); off by default. */
+	storeFullScan?: boolean
 }
 
 export interface ResolvedConfig extends RepairConfig {
@@ -67,9 +85,14 @@ export interface ResolvedConfig extends RepairConfig {
 	repairTimeoutMs: number
 	maxRetries: number
 	cooldownMs: number
+	relinkCooldownMs: number
 	appendDiagnostics: boolean
 	grantFallback: boolean
 	deepScan: boolean
+	lowLabelRepair: boolean
+	storeFullScan: boolean
+	storeDirs: string[]
+	repoScanRoots: string[]
 }
 
 export interface RepairOutcome {
