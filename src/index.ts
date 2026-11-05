@@ -39,7 +39,7 @@ import type {
 	ResolvedConfig,
 	ShellSpec,
 } from './types.ts'
-import { installPatch, loadPreload } from './patch.ts'
+import { installPatch, loadPreload, sweepStaleTempArtifacts } from './patch.ts'
 import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
 import type { CapabilityRepairOutcome } from './capability-repair.ts'
 import { defaultRepoRoots, defaultStoreDirs, type LowLabelOutcome } from './low-label-repair.ts'
@@ -602,6 +602,14 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 
 	if (opts.mode !== 'repair' && process.platform === 'win32') {
 		installPatch()
+		// Reclaim the plugin's own stale scratch copies (workspace `.dsh-tmp`
+		// first, %TEMP% fallback). Bounded, silent, and skipped while
+		// NODE_OPTIONS still references a copy.
+		try {
+			sweepStaleTempArtifacts()
+		} catch {
+			/* best-effort: cleanup never blocks startup */
+		}
 	}
 
 	shell[method] = wrapShell(orig, { opts, runner, state }, { labelProbe, probe })

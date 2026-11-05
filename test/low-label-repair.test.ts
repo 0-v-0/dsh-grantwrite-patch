@@ -234,7 +234,7 @@ test('repairStore: reverse-maps labeled repo native to store, swaps PE inode', a
 })
 
 test('repairStore allFiles: labeled plain .js store inode is repaired too', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const storeDir = join(dir, 'store')
 		const storeFile = join(storeDir, 'obj1')
@@ -271,7 +271,7 @@ test('repairStore allFiles: labeled plain .js store inode is repaired too', asyn
 })
 
 test('relinkNodeModules allFiles: labeled plain .js re-linked to clean store inode', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const storeDir = join(dir, 'store')
 		const storeFile = join(storeDir, 'obj1')
@@ -309,7 +309,7 @@ test('relinkNodeModules allFiles: labeled plain .js re-linked to clean store ino
 })
 
 test('relinkNodeModules: labeled file without store target swapped in place', async () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-ll-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-ll-'))
 	try {
 		const repo = join(dir, 'repo')
 		const nm = join(repo, 'node_modules')

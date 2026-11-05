@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import os from 'node:os'
+import { SCRATCH_ROOT } from './scratch.ts'
 import path from 'node:path'
 import test from 'node:test'
 import { probeWorkspaceSize } from '../src/size-probe.ts'
@@ -14,7 +14,7 @@ function makeTree(root: string, dirs: number, filesPerDir: number): void {
 }
 
 test('probe: small tree below threshold is not large', async () => {
-	const ws = mkdtempSync(path.join(os.tmpdir(), 'dsh-grw-probe-'))
+	const ws = mkdtempSync(path.join(SCRATCH_ROOT, 'dsh-grw-probe-'))
 	try {
 		makeTree(ws, 3, 3) // 3 dirs + 9 files = 12 objects
 		const r = await probeWorkspaceSize(ws, 100, 5000)
@@ -26,7 +26,7 @@ test('probe: small tree below threshold is not large', async () => {
 })
 
 test('probe: tree at/above threshold is large, count capped', async () => {
-	const ws = mkdtempSync(path.join(os.tmpdir(), 'dsh-grw-probe-'))
+	const ws = mkdtempSync(path.join(SCRATCH_ROOT, 'dsh-grw-probe-'))
 	try {
 		makeTree(ws, 5, 5) // 5 dirs + 25 files = 30 objects
 		const r = await probeWorkspaceSize(ws, 10, 5000)
@@ -38,7 +38,7 @@ test('probe: tree at/above threshold is large, count capped', async () => {
 })
 
 test('probe: timeout on a slow tree resolves large (conservative)', async () => {
-	const ws = mkdtempSync(path.join(os.tmpdir(), 'dsh-grw-probe-'))
+	const ws = mkdtempSync(path.join(SCRATCH_ROOT, 'dsh-grw-probe-'))
 	try {
 		makeTree(ws, 50, 100) // 50 dirs + 5000 files — far beyond a 1ms walk
 		const r = await probeWorkspaceSize(ws, 1_000_000, 1) // 1ms timeout, tree larger than that
@@ -50,12 +50,12 @@ test('probe: timeout on a slow tree resolves large (conservative)', async () => 
 })
 
 test('probe: missing root resolves not-large (FFI patch carries it)', async () => {
-	const r = await probeWorkspaceSize(path.join(os.tmpdir(), 'dsh-grw-does-not-exist'), 100, 5000)
+	const r = await probeWorkspaceSize(path.join(SCRATCH_ROOT, 'dsh-grw-does-not-exist'), 100, 5000)
 	assert.equal(r.large, false)
 })
 
 test('probe: unreadable subtree is skipped, not fatal', async () => {
-	const ws = mkdtempSync(path.join(os.tmpdir(), 'dsh-grw-probe-'))
+	const ws = mkdtempSync(path.join(SCRATCH_ROOT, 'dsh-grw-probe-'))
 	try {
 		makeTree(ws, 2, 2)
 		const r = await probeWorkspaceSize(ws, 100, 5000)
