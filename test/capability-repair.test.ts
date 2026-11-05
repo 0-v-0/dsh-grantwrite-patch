@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, rmSync } from 'node:fs'
-import os from 'node:os'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import {
@@ -14,6 +13,7 @@ import {
 	repairCapabilityTreeDeep,
 	scanTree,
 } from '../src/capability-repair.ts'
+import { SCRATCH_ROOT } from './scratch.ts'
 
 /** Simulate a real hardened subdir: add the world Deny DC while keeping
  * inheritance alive (as upstream #423/#9559 dirs are). The capability SID is
@@ -35,8 +35,54 @@ function cleanupTree(base: string): void {
 }
 
 function makeTempDir(): string {
-	return path.join(os.tmpdir(), `dsh-grantwrite-patch-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+	return mkdtempSync(path.join(SCRATCH_ROOT, 'cap-'))
 }
+
+/** Probe whether `icacls` can read an ACL here (false = available). DSH's own
+ * sandbox, a stripped PATH or a non-Windows host make the suite red for
+ * environmental reasons, so the affected tests skip instead of failing. */
+function probeIcacls(): string | false {
+	if (process.platform !== 'win32') {
+		return 'icacls is Windows-only'
+	}
+	const dir = makeTempDir()
+	try {
+		execFileSync('icacls', [dir], { stdio: 'ignore' })
+		return false
+	} catch (e) {
+		return `icacls unavailable: ${(e as Error).message.split('\n')[0]}`
+	} finally {
+		rmSync(dir, { force: true, recursive: true })
+	}
+}
+
+/** Probe whether PowerShell can load Microsoft.PowerShell.Security and write an
+ * ACL (Get-Acl + Set-Acl round-trip on a scratch dir). */
+function probeSetAcl(): string | false {
+	if (process.platform !== 'win32') {
+		return 'Set-Acl is Windows-only'
+	}
+	const dir = makeTempDir()
+	try {
+		execFileSync(
+			'powershell',
+			['-NoProfile', '-NonInteractive', '-Command', `$acl = Get-Acl '${dir}'; Set-Acl '${dir}' $acl`],
+			{ encoding: 'utf8', stdio: 'pipe' },
+		)
+		return false
+	} catch (e) {
+		const stderr = (e as { stderr?: string }).stderr ?? (e as Error).message
+		return `Set-Acl unavailable: ${stderr.trim().split('\n')[0]}`
+	} finally {
+		rmSync(dir, { force: true, recursive: true })
+	}
+}
+
+/** Skip reason when the host cannot read ACLs at all. */
+const icaclsSkip = probeIcacls()
+/** Skip reason when the host cannot write ACLs (missing PowerShell security
+ * module, denied Set-Acl, or no icacls at all). */
+const setAclSkip = icaclsSkip || probeSetAcl()
 
 /** A synthetic capability SID (S-1-4-21 = SECURITY_CAPABILITY_BASE_RID).
  * Set-Acl accepts it without the SID existing; icacls renders it back. */
@@ -62,9 +108,8 @@ function seedCapabilitySid(dir: string): void {
 	execFileSync('powershell', ps, { encoding: 'utf8' })
 }
 
-test('capabilitySids reads injected S-1-4-* SIDs off a directory', () => {
+test('capabilitySids reads injected S-1-4-* SIDs off a directory', { skip: setAclSkip }, () => {
 	const dir = makeTempDir()
-	mkdirSync(dir)
 	try {
 		seedCapabilitySid(dir)
 		const sids = capabilitySids(dir)
@@ -76,11 +121,9 @@ test('capabilitySids reads injected S-1-4-* SIDs off a directory', () => {
 	}
 })
 
-test('grantCapability adds an (OI)(CI)(R,W,D,DC) Allow ACE for the SID', () => {
+test('grantCapability adds an (OI)(CI)(R,W,D,DC) Allow ACE for the SID', { skip: setAclSkip }, () => {
 	const base = makeTempDir()
-	mkdirSync(base)
 	const dir = makeTempDir()
-	mkdirSync(dir)
 	try {
 		seedCapabilitySid(base)
 		const [sid] = capabilitySids(base)
@@ -97,7 +140,7 @@ test('grantCapability adds an (OI)(CI)(R,W,D,DC) Allow ACE for the SID', () => {
 	}
 })
 
-test('findHardenedDirs flags subdirs with world Deny DC but no capability Allow', () => {
+test('findHardenedDirs flags subdirs with world Deny DC but no capability Allow', { skip: setAclSkip }, () => {
 	const base = makeTempDir()
 	const sub = path.join(base, 'sub')
 	mkdirSync(sub, { recursive: true })
@@ -112,7 +155,7 @@ test('findHardenedDirs flags subdirs with world Deny DC but no capability Allow'
 	}
 })
 
-test('repairCapabilityTree back-fills a hardened subdir and is idempotent', () => {
+test('repairCapabilityTree back-fills a hardened subdir and is idempotent', { skip: setAclSkip }, () => {
 	const base = makeTempDir()
 	const sub = path.join(base, 'sub')
 	mkdirSync(sub, { recursive: true })
@@ -133,11 +176,18 @@ test('repairCapabilityTree back-fills a hardened subdir and is idempotent', () =
 	}
 })
 
-test('repairCapabilityTree returns skipped for a root without capability SIDs', () => {
+test('repairCapabilityTree returns skipped for a root without capability SIDs', { skip: icaclsSkip }, (t) => {
 	const dir = makeTempDir()
-	mkdirSync(dir)
 	try {
-		// A plain temp dir has no S-1-4-* capability SID: nothing to back-fill.
+		// The scratch dir lives under the workspace `.dsh-tmp`, which inherits
+		// the workspace ACL: on a workspace the sandbox already granted, its
+		// capability SIDs propagate down and a fresh child is no longer
+		// "SID-free", so this premise cannot be built here.
+		if (capabilitySids(dir).length > 0) {
+			t.skip('inherited capability SIDs from the workspace ACL')
+			return
+		}
+		// A plain dir has no S-1-4-* capability SID: nothing to back-fill.
 		const out = repairCapabilityTree(dir)
 		assert.equal(out.fixed.length, 0)
 		assert.ok(out.skipped >= 1)
@@ -146,7 +196,7 @@ test('repairCapabilityTree returns skipped for a root without capability SIDs', 
 	}
 })
 
-test('isHardenedDir: Deny DC without capability Allow, and the fixed state', () => {
+test('isHardenedDir: Deny DC without capability Allow, and the fixed state', { skip: setAclSkip }, () => {
 	const base = makeTempDir()
 	const sub = path.join(base, 'sub')
 	mkdirSync(sub, { recursive: true })
@@ -165,7 +215,7 @@ test('isHardenedDir: Deny DC without capability Allow, and the fixed state', () 
 	}
 })
 
-test('scanTree finds hardened dirs at any depth via icacls /T', async () => {
+test('scanTree finds hardened dirs at any depth via icacls /T', { skip: icaclsSkip }, async () => {
 	const base = makeTempDir()
 	const nested = path.join(base, 'a', 'b', 'c')
 	mkdirSync(nested, { recursive: true })
@@ -184,7 +234,7 @@ test('scanTree finds hardened dirs at any depth via icacls /T', async () => {
 	}
 })
 
-test('repairCapabilityTreeDeep back-fills deep hardened dirs, idempotent, skips fixed ones', async () => {
+test('repairCapabilityTreeDeep back-fills deep hardened dirs, idempotent, skips fixed ones', { skip: setAclSkip }, async () => {
 	const base = makeTempDir()
 	const deep1 = path.join(base, 'x', 'y')
 	const deep2 = path.join(base, 'x', 'z')

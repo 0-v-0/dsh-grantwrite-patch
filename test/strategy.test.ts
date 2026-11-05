@@ -13,6 +13,7 @@ import {
 	resolveConfig,
 	resolveSandboxScript,
 } from '../src/index.ts'
+import { SCRATCH_ROOT } from './scratch.ts'
 
 function wait(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms))
@@ -40,7 +41,7 @@ test('resolveConfig defaults: mode auto, threshold 20000, probe windows', () => 
 })
 
 test('decideWorkspace: Low-label relink fires for workspaces with node_modules, then cools down', async () => {
-	const dir = mkdtempSync(join(os.tmpdir(), 'dsh-rl-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-rl-'))
 	try {
 		mkdirSync(join(dir, 'node_modules'), { recursive: true })
 		writeFileSync(join(dir, 'node_modules', 'x.dll'), 'x')
@@ -280,7 +281,7 @@ test('preload.cjs loads as CJS with expected exports', () => {
 })
 
 test('resolveSandboxScript resolves from sandbox package assets (fake pkg)', () => {
-	const tmp = mkdtempSync(path.join(os.tmpdir(), 'dsh-grw-pkg-'))
+	const tmp = mkdtempSync(path.join(SCRATCH_ROOT, 'dsh-grw-pkg-'))
 	try {
 		const pkgRoot = path.join(tmp, 'node_modules', '@deepseek-ai', 'dsh-sandbox-windows-acl')
 		const scriptDir = path.join(pkgRoot, 'assets', 'diagnose-windows-sandbox-acl', 'scripts')
@@ -302,7 +303,7 @@ test('resolveSandboxScript resolves from sandbox package assets (fake pkg)', () 
 })
 
 test('resolveSandboxScript returns null without the sandbox package', () => {
-	const tmp = mkdtempSync(path.join(os.tmpdir(), 'dsh-grw-nopkg-'))
+	const tmp = mkdtempSync(path.join(SCRATCH_ROOT, 'dsh-grw-nopkg-'))
 	try {
 		assert.equal(resolveSandboxScript([tmp]), null)
 	} finally {

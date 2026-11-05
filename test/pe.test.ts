@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isPeFileSync, isPeHeader, peOffset } from '../src/pe.ts'
+import { SCRATCH_ROOT } from './scratch.ts'
 
 function buildPe(e_lfanew: number, machine: number): Buffer {
 	const buf = Buffer.alloc(e_lfanew + 24)
@@ -44,7 +44,7 @@ test('isPeHeader: known machines pass, junk fails', () => {
 })
 
 test('isPeFileSync: real PE file detected, text/truncated rejected', () => {
-	const dir = mkdtempSync(join(tmpdir(), 'dsh-pe-'))
+	const dir = mkdtempSync(join(SCRATCH_ROOT, 'dsh-pe-'))
 	try {
 		const pe = join(dir, 'tool.exe')
 		writeFileSync(pe, buildPe(0x80, 0xaa64))
