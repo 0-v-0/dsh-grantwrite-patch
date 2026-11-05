@@ -41,17 +41,17 @@
 		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json"
 	},
 	"devDependencies": {
-		"@secretlint/node": "^13.0.7",
-		"@secretlint/secretlint-rule-preset-recommend": "^13.0.7",
-		"@types/node": "^26.6.5",
 		"@0-v-0/git-hooks": "file:../git-hooks",
+		"@secretlint/node": "^13.1.0",
+		"@secretlint/secretlint-rule-preset-recommend": "^13.1.0",
+		"@types/node": "^26.6.6",
 		"eslint-plugin-eslint-comments": "^3.2.0",
 		"eslint-plugin-n": "^18.5.0",
-		"eslint-plugin-regexp": "^3.3.1",
+		"eslint-plugin-regexp": "^3.3.3",
 		"eslint-plugin-sonarjs": "^4.2.2",
 		"eslint-plugin-unicorn": "^78.0.0",
-		"oxlint": "^1.89.0",
-		"oxlint-tsgolint": "^7.0.2004",
+		"oxlint": "^1.93.0",
+		"oxlint-tsgolint": "^7.0.2006",
 		"typescript": "^7.0.2"
 	},
 	"@0-v-0/git-hooks": {
