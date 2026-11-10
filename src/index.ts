@@ -611,7 +611,9 @@ export function apply(ctx: CtxLike, config: RepairConfig = {}, deps: ApplyDeps =
 	const labelProbe =
 		deps.labelProbe ??
 		((root: string) =>
-			process.platform === 'win32' ? (loadPreload()?.workspaceHasLowLabel(root) ?? null) : null)
+			process.platform === 'win32'
+				? (loadPreload()?.workspaceHasLowLabel(root) ?? null)
+				: null)
 
 	if (opts.mode !== 'repair' && process.platform === 'win32') {
 		installPatch()

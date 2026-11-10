@@ -568,7 +568,9 @@ function install() {
 			if (isKoffiRequest(request)) {
 				try {
 					const target =
-						loaded && loaded.default && loaded.default !== loaded ? loaded.default : loaded
+						loaded && loaded.default && loaded.default !== loaded
+							? loaded.default
+							: loaded
 					if (target && typeof target.load === 'function') {
 						koffiRef ??= target
 					}
