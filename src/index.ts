@@ -42,10 +42,12 @@ import type {
 import { installPatch, loadPreload, sweepStaleTempArtifacts } from './patch.ts'
 import { probeWorkspaceSize, type ProbeResult } from './size-probe.ts'
 import type { CapabilityRepairOutcome } from './capability-repair.ts'
+import type { ProtectedDaclOutcome } from './protected-dacl-repair.ts'
 import { defaultRepoRoots, defaultStoreDirs, type LowLabelOutcome } from './low-label-repair.ts'
 import {
 	backfillCapabilitySids,
 	scheduleDeepScan,
+	scheduleProtectedDaclScan,
 	scheduleRelink,
 	scheduleStoreRepair,
 } from './background.ts'
@@ -164,6 +166,7 @@ export function resolveConfig(config: RepairConfig = {}): ResolvedConfig {
 		outDir: path.join(resolveDshHome(), 'grantwrite-patch'),
 		probeCooldownMs: 3600000,
 		probeTimeoutMs: 10000,
+		protectedDaclScan: true,
 		relinkCooldownMs: 60000,
 		repairTimeoutMs: 120000,
 		repoScanRoots: defaultRepoRoots(),
@@ -377,6 +380,10 @@ export interface RecoveryState {
 	deepScanned: Map<string, number>
 	// One in-flight background deep scan per root; concurrent calls share it.
 	deepInFlight: Map<string, Promise<void>>
+	// Last protected-DACL scan timestamp per root (probeCooldownMs window).
+	protectedScanned: Map<string, number>
+	// One in-flight protected-DACL scan per root; concurrent calls share it.
+	protectedInFlight: Map<string, Promise<void>>
 	// Last Low-label node_modules relink timestamp per root.
 	relinked: Map<string, number>
 	// One in-flight relink per root; concurrent calls share it.
@@ -391,6 +398,8 @@ export function makeRecoveryState(): RecoveryState {
 		deepScanned: new Map(),
 		inflight: new Map(),
 		lastRepair: new Map(),
+		protectedInFlight: new Map(),
+		protectedScanned: new Map(),
 		relinkInFlight: new Map(),
 		relinked: new Map(),
 	}
@@ -440,6 +449,9 @@ export interface ApplyDeps {
 	/** Background full-tree capability back-fill; tests stub this to avoid
 	 * real icacls /T spawns. Defaults to repairCapabilityTreeDeep. */
 	deepRunner?: (root: string, opts: { timeoutMs?: number }) => Promise<CapabilityRepairOutcome>
+	/** Background full-tree protected-DACL back-fill; tests stub this to avoid
+	 * real PowerShell walks. Defaults to repairProtectedDaclTreeDeep. */
+	protectedRunner?: (root: string, opts: { timeoutMs?: number }) => Promise<ProtectedDaclOutcome>
 	/** Low-label node_modules relink; tests stub this. Defaults to relinkNodeModules. */
 	relinker?: (root: string, opts?: {}) => Promise<LowLabelOutcome>
 	/** Background store repair; tests stub this. Defaults to repairStore. */
@@ -473,6 +485,7 @@ export async function decideWorkspace(
 	// so it must run even in a strict environment.
 	backfillCapabilitySids(root, opts, state, now)
 	scheduleDeepScan(root, opts, state, hooks, now)
+	scheduleProtectedDaclScan(root, opts, state, hooks, now)
 	scheduleRelink(root, opts, state, hooks, now)
 
 	let label: boolean | null = null

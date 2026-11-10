@@ -18,6 +18,7 @@ import path from 'node:path'
 import type { ApplyDeps, RecoveryState } from './index.ts'
 import type { ResolvedConfig } from './types.ts'
 import { repairCapabilityTree, repairCapabilityTreeDeep } from './capability-repair.ts'
+import { repairProtectedDaclTreeDeep } from './protected-dacl-repair.ts'
 import { relinkNodeModules, repairStore } from './low-label-repair.ts'
 
 // One background store repair per plugin start (see apply()).
@@ -89,6 +90,53 @@ export function scheduleDeepScan(
 			state.deepInFlight.delete(root)
 		})
 	state.deepInFlight.set(root, deep)
+}
+
+/**
+ * Protected-DACL backfill (upstream #8409 defect A / #423): directories whose
+ * DACL is protected never inherit the root's capability Allow, world deny or
+ * Low label, so the confined token is denied inside them permanently. The
+ * shallow icacls pass above cannot see them (`icacls` does not print
+ * `SE_DACL_PROTECTED`), so this pass walks with PowerShell `Get-Acl` and
+ * applies the three edits in place. Full-tree, fire-and-forget, own cooldown —
+ * never on the command path.
+ */
+export function scheduleProtectedDaclScan(
+	root: string,
+	opts: ResolvedConfig,
+	state: RecoveryState,
+	hooks: ApplyDeps,
+	now: number,
+): void {
+	if (!opts.protectedDaclScan) {
+		return
+	}
+	const last = state.protectedScanned.get(root)
+	if (state.protectedInFlight.has(root) || (last !== undefined && now - last < opts.probeCooldownMs)) {
+		return
+	}
+	const scan = (hooks.protectedRunner ?? repairProtectedDaclTreeDeep)(root, {
+		timeoutMs: opts.repairTimeoutMs,
+	})
+		.then((outcome) => {
+			state.protectedScanned.set(root, Date.now())
+			if (outcome.error) {
+				console.warn(
+					`[dsh-grantwrite-patch] protected-DACL scan ${root} failed: ${outcome.error}`,
+				)
+			} else if (outcome.fixed.length > 0) {
+				console.log(
+					`[dsh-grantwrite-patch] protected-DACL backfill ${root}: fixed ${outcome.fixed.length} dir(s), ${outcome.errors.length} error(s)`,
+				)
+			}
+		})
+		.catch(() => {
+			// best-effort: never let the background scan surface
+		})
+		.finally(() => {
+			state.protectedInFlight.delete(root)
+		})
+	state.protectedInFlight.set(root, scan)
 }
 
 /**
