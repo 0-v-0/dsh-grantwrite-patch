@@ -57,6 +57,12 @@ export interface RepairConfig {
 	 * depth (the fix-delete-acl.ts --all equivalent) so no manual script is
 	 * needed. Fire-and-forget, per-workspace probeCooldownMs cache. Default true. */
 	deepScan?: boolean
+	/** Background protected-DACL back-fill (upstream #8409 defect A): walk the
+	 * tree with PowerShell `Get-Acl`, then apply the capability Allow + world
+	 * deny + Low label to every directory whose DACL is protected (`D:P`) and
+	 * therefore never inherited the root grant. Fire-and-forget, per-workspace
+	 * probeCooldownMs cache. Default true. */
+	protectedDaclScan?: boolean
 	/**
 	 * Low-integrity label cascade repair (TS5033 family): at plugin start,
 	 * background-repair labeled native binaries in the pnpm store (reverse
@@ -90,6 +96,7 @@ export interface ResolvedConfig extends RepairConfig {
 	appendDiagnostics: boolean
 	grantFallback: boolean
 	deepScan: boolean
+	protectedDaclScan: boolean
 	lowLabelRepair: boolean
 	storeFullScan: boolean
 	storeDirs: string[]

@@ -60,3 +60,13 @@
         # never on the command path; one run per workspace per probeCooldownMs.
         # Default true.
         deepScan: true
+        # Background protected-DACL back-fill (upstream #8409 defect A / #423):
+        # a subdirectory whose DACL is protected (SE_DACL_PROTECTED — from
+        # `icacls /inheritance:r`, an ACL-preserving copy or a backup restore)
+        # never inherits the workspace grant, so the confined token is denied
+        # inside it forever. The pass walks the tree with PowerShell `Get-Acl`
+        # (icacls cannot show the protected flag) and applies the root's three
+        # edits to each such directory through the official AclWriteGrant, so
+        # the directory keeps its protected DACL. Fire-and-forget, one run per
+        # workspace per probeCooldownMs. Default true.
+        protectedDaclScan: true

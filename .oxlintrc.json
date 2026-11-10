@@ -405,6 +405,18 @@
 			}
 		},
 		{
+			// src/index.ts is the plugin entry point: config resolution, the
+			// recovery state machine and the shell wrapper are kept together on
+			// purpose. It crossed the generic 500-line nudge when the
+			// protected-DACL back-fill landed; size limits are warn-only
+			// splitting hints, not CI gates, so exempt this one orchestration
+			// unit instead of scattering the state machine across modules.
+			"files": ["src/index.ts"],
+			"rules": {
+				"max-lines": "off"
+			}
+		},
+		{
 			// Size limits are nudges for source, not for tests: specs are
 			// legitimately long (fixtures, per-case describes) and splitting
 			// them on line count would only add churn.
