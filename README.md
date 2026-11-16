@@ -86,6 +86,30 @@ Notes:
       # outDir: <absolute path>       # default: $DSH_HOME/grantwrite-patch (~/.dsh/grantwrite-patch without DSH_HOME)
 ```
 
+## Patch script: acl-only mode
+
+`workspace-write` normally writes a permanent, inheritable Low mandatory label onto every granted root. That label outlives the sandbox run: an executable inside a labeled directory keeps running at Low integrity afterwards and then cannot write normal files, even under `danger-full-access`.
+
+`scripts/patch-acl.ts` generates the pnpm patch that removes the label side of the sandbox instead:
+
+- adds a **grant-root guard** — refuses drive roots, `%USERPROFILE%`, ancestors of the DSH home, subtrees that carry PE executables, and roots above 20,000 entries;
+- stops writing the Low label, so a grant stays DACL-only and nothing is ever lowered;
+- keeps the confined token at its ambient integrity.
+
+```sh
+pnpm patch:acl --check   # list the edits, write nothing
+pnpm patch:acl           # write patches/@deepseek-ai__dsh-sandbox-windows-acl@<version>.patch
+```
+
+Register the emitted file in the hosting `pnpm-workspace.yaml`:
+
+```yaml
+patchedDependencies:
+  '@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.1': patches/@deepseek-ai__dsh-sandbox-windows-acl@0.2.2-rc.1.patch
+```
+
+`--target <dir>` points at a specific installed package (default: resolved from the current directory), and `DSH_ACL_DIR` overrides it. The script is skipped on non-Windows hosts, and it never edits the installed package in place — it only emits a patch for pnpm to apply.
+
 ## Security model
 
 - **patch path**: touches no system ACL and leaves no persistent side effect; the `WRITE_RESTRICTED` restricted token, capability-SID Allow ACEs, and the world-SID `FILE_DELETE_CHILD` Deny are preserved. The only thing lost is the Low-integrity label layer of defence in depth (children run at Medium), and only on hosts that could not apply the label in the first place.

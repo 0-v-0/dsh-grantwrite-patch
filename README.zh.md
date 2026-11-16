@@ -86,6 +86,30 @@ dsh plugin --profile web add .
       # outDir: <绝对路径>       # 默认: $DSH_HOME/grantwrite-patch（无 DSH_HOME 时 ~/.dsh/grantwrite-patch）
 ```
 
+## Patch 脚本：acl-only 模式
+
+`workspace-write` 默认会往每个授权根写一个**继承且永不撤销**的 Low 强制标签。这个标签会在沙箱结束后继续生效：被标签目录里的可执行文件之后一直以 Low 完整性运行，连 `danger-full-access` 下都写不了普通文件。
+
+`scripts/patch-acl.ts` 生成 pnpm patch，把「打标签」这一半去掉：
+
+- 加**根守卫**——拒绝盘根、`%USERPROFILE%`、DSH home 的祖先、含 PE 可执行文件的子树，以及超过 20000 条目的根；
+- 不再写 Low 标签，授权只走 DACL，任何对象都不会被降级；
+- 受限令牌保持调用者的完整性级别。
+
+```sh
+pnpm patch:acl --check   # 只列出改动，不写文件
+pnpm patch:acl           # 写出 patches/@deepseek-ai__dsh-sandbox-windows-acl@<version>.patch
+```
+
+把生成的文件登记到宿主 `pnpm-workspace.yaml`：
+
+```yaml
+patchedDependencies:
+  '@deepseek-ai/dsh-sandbox-windows-acl@0.2.2-rc.1': patches/@deepseek-ai__dsh-sandbox-windows-acl@0.2.2-rc.1.patch
+```
+
+`--target <dir>` 指定已安装的包目录（默认从当前目录解析），`DSH_ACL_DIR` 可覆盖。非 Windows 系统自动跳过；脚本不会就地修改已安装的包，只产出交给 pnpm 应用的 patch。
+
 ## 安全模型
 
 - **patch 路径**：不改任何系统 ACL、无持久副作用；保留 `WRITE_RESTRICTED` 受限令牌、capability SID Allow ACE、world SID `FILE_DELETE_CHILD` Deny。失去的仅是 Low 完整性标签这一层纵深（子进程 Medium），且仅在本来打不上标签的环境发生。
