@@ -8,25 +8,20 @@
  * means it is never retried: the confined token — Low integrity, restricted to
  * logon + Everyone + the capability SID — is denied inside it forever.
  *
- * This pass finds those directories and gives them the SAME three edits the
- * root carries, through the official `AclWriteGrant` (resolved from the running
- * DSH installation, so the label / deny stay byte-identical and the privilege
- * context is the one DSH itself uses). The directory keeps its protected DACL,
- * so the fix stays scoped to the tree the user protected.
- *
- * Detection needs `AreAccessRulesProtected`, which `icacls` text does not show,
- * so one PowerShell process walks the tree with `Get-Acl` (read-only — no
- * Add-Type, no Set-Acl: a confined shell cannot do either). The walk is the
- * expensive part on a big workspace, which is why it only ever runs in the
- * background (background.ts) — never on the command path.
+ * Both halves run in the HOST process:
+ *  - detection reads the DACL through koffi (`acl-detect.ts`) — no child
+ *    process, no temp file, nothing written into the user's workspace;
+ *  - the fix goes through the official `AclWriteGrant`, with the same
+ *    deterministic workspace SID the sandbox derived, so the three edits land
+ *    byte-identical to the root's and the directory keeps its protected DACL.
  */
-import { spawnSync } from 'node:child_process'
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import os from 'node:os'
-import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { capabilitySids } from './capability-repair.ts'
+import { walkProtectedDirs, type SddlReader, type WalkOptions } from './acl-detect.ts'
+
+export { isProtectedSddl } from './acl-detect.ts'
 
 /** Outcome of one protected-DACL pass. */
 export interface ProtectedDaclOutcome {
@@ -39,13 +34,14 @@ export interface ProtectedDaclOutcome {
 
 /** Options shared by the shallow and the deep passes. */
 export interface ProtectedDaclOptions {
-	timeoutMs?: number
 	/** Capability SID override (defaults to the workspace root's own SID). */
 	sid?: string
 	/** Detection roots for the official ACL module; defaults to the DSH install. */
 	moduleBases?: string[]
 	/** Grant factory override (tests inject a stub instead of the official module). */
 	grantFactory?: GrantFactory
+	/** DACL reader override (tests inject a stub instead of the FFI one). */
+	reader?: SddlReader
 }
 
 /**
@@ -73,137 +69,8 @@ export interface GrantHandle {
 /** Opens one standing grant for the workspace (official module by default). */
 export type GrantFactory = (root: string) => Promise<GrantHandle | undefined>
 
-/** Scratch directory name under the OS temp root (plugin-owned, never removed). */
-const SCRATCH_NAME = 'dsh-grantwrite-patch'
-/** Script file name inside {@link SCRATCH_NAME}. */
-const SCRIPT_NAME = 'protected-dacl.ps1'
 /** Package that owns the grant implementation. */
 const ACL_PACKAGE = '@deepseek-ai/dsh-sandbox-windows-acl'
-
-/**
- * Pure: does this DACL SDDL form carry `SE_DACL_PROTECTED`? The flag segment
- * sits between `D:` and the first ACE (`D:PAI(...)` = protected + auto-inherit,
- * `D:AI(...)` = inheriting).
- */
-export function isProtectedSddl(sddl: string): boolean {
-	const flags = /^D:([A-Z]*)/.exec(sddl)?.[1] ?? ''
-	return flags.includes('P')
-}
-
-/**
- * Read-only PowerShell walk: report every directory whose DACL is protected and
- * which does not carry the capability Allow yet. Deliberately does NOT edit any
- * ACL — a confined shell has neither `SeSecurityPrivilege` (label) nor a writable
- * temp for `Add-Type`, so the edits belong to the official module in-process.
- */
-const PS_SCAN = String.raw`param(
-  [Parameter(Mandatory = $true)][string]$Root,
-  [string]$Sid = '',
-  [switch]$Recurse
-)
-
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-$items = @(Get-Item -LiteralPath $Root -ErrorAction Stop)
-if ($Recurse) {
-	$items += @(Get-ChildItem -LiteralPath $Root -Directory -Recurse -Force -ErrorAction SilentlyContinue)
-}
-
-$hits = New-Object System.Collections.Generic.List[string]
-$errors = New-Object System.Collections.Generic.List[string]
-
-foreach ($item in $items) {
-	$itemPath = $item.FullName
-	try {
-		$acl = Get-Acl -LiteralPath $itemPath
-		$sddl = $acl.GetSecurityDescriptorSddlForm('Access')
-		$flags = [regex]::Match($sddl, '^D:([A-Z]*)').Groups[1].Value
-		if (-not $flags.Contains('P')) { continue }
-		if ($Sid -ne '' -and $sddl.Contains($Sid)) { continue }
-		$hits.Add($itemPath)
-	} catch {
-		$errors.Add(('{0}: {1}' -f $itemPath, $_.Exception.Message))
-	}
-}
-
-[pscustomobject]@{ hits = @($hits); errors = @($errors) } | ConvertTo-Json -Compress -Depth 3
-`
-
-let scriptPath: string | null | undefined
-
-/** Candidate scratch directories, most portable first: the OS temp root, then
- * the workspace-local scratch (`.dsh-tmp`), which a confined shell can still
- * write when the OS temp root is not accessible to it. */
-function scratchDirs(): string[] {
-	return [join(os.tmpdir(), SCRATCH_NAME), join(process.cwd(), '.dsh-tmp', SCRATCH_NAME)]
-}
-
-/** Path to the extracted PowerShell program; extracts once per process. */
-function ensureScript(): string | null {
-	if (scriptPath !== undefined) {
-		return scriptPath
-	}
-	for (const dir of scratchDirs()) {
-		try {
-			mkdirSync(dir, { recursive: true })
-			const file = join(dir, SCRIPT_NAME)
-			writeFileSync(file, PS_SCAN, 'utf8')
-			scriptPath = file
-			return scriptPath
-		} catch {
-			/* try the next scratch root */
-		}
-	}
-	scriptPath = null
-	return scriptPath
-}
-
-/** Windows PowerShell 5.1 first (always present), pwsh as the stripped-env fallback. */
-function shells(): string[] {
-	return process.platform === 'win32' ? ['powershell', 'pwsh'] : []
-}
-
-/** Build the argv for one attempt (script path followed by the switches). */
-function scanArgs(file: string, root: string, sid: string, recurse: boolean): string[] {
-	const args = [
-		'-NoProfile',
-		'-NonInteractive',
-		'-ExecutionPolicy',
-		'Bypass',
-		'-File',
-		file,
-		'-Root',
-		root,
-		'-Sid',
-		sid,
-	]
-	if (recurse) {
-		args.push('-Recurse')
-	}
-	return args
-}
-
-/** Parse the script's single JSON line; undefined on anything unexpected. */
-export function parseScanOutcome(stdout: string): { hits: string[]; errors: string[] } | undefined {
-	const line = stdout.trim().split(/\r?\n/).pop() ?? ''
-	const start = line.indexOf('{')
-	if (start < 0) {
-		return undefined
-	}
-	try {
-		const parsed = JSON.parse(line.slice(start)) as { hits?: unknown; errors?: unknown }
-		const hits = Array.isArray(parsed.hits)
-			? parsed.hits.filter((p): p is string => typeof p === 'string')
-			: []
-		const errors = Array.isArray(parsed.errors)
-			? parsed.errors.filter((p): p is string => typeof p === 'string')
-			: []
-		return { errors, hits }
-	} catch {
-		return undefined
-	}
-}
 
 /** Capability SID to look for: the root's own write SID when it carries one. */
 export function workspaceCapabilitySid(root: string): string {
@@ -221,6 +88,10 @@ function defaultBases(): string[] {
 	if (typeof entry === 'string' && entry.length > 0) {
 		bases.push(entry)
 	}
+	const override = process.env.DSH_GRANTWRITE_HOST_BASES
+	if (override !== undefined && override.trim().length > 0) {
+		bases.push(...override.split(process.platform === 'win32' ? ';' : ':').filter(Boolean))
+	}
 	bases.push(process.cwd())
 	return bases
 }
@@ -231,19 +102,14 @@ function defaultBases(): string[] {
  * the same base list the diagnose-script lookup uses. Undefined when the host
  * cannot be located (the caller then reports the miss instead of guessing).
  */
-export async function loadAclModule(
-	bases: string[] = defaultBases(),
-): Promise<AclModuleLike | undefined> {
+export async function loadAclModule(bases: string[] = defaultBases()): Promise<AclModuleLike | undefined> {
 	for (const base of bases) {
 		try {
 			const require = createRequire(base)
 			const entry = require.resolve(ACL_PACKAGE)
 			// eslint-disable-next-line no-await-in-loop -- candidates are tried in order; the first hit wins
 			const mod = (await import(pathToFileURL(entry).href)) as AclModuleLike
-			if (
-				typeof mod.workspaceWriteSid === 'function' &&
-				typeof mod.AclWriteGrant?.create === 'function'
-			) {
+			if (typeof mod.workspaceWriteSid === 'function' && typeof mod.AclWriteGrant?.create === 'function') {
 				return mod
 			}
 		} catch {
@@ -258,10 +124,7 @@ export async function loadAclModule(
  * SID the sandbox derived (the module reuses it, so the edits land on the exact
  * identity the confined token carries).
  */
-export async function openOfficialGrant(
-	root: string,
-	bases?: string[],
-): Promise<GrantHandle | undefined> {
+export async function openOfficialGrant(root: string, bases?: string[]): Promise<GrantHandle | undefined> {
 	const mod = await loadAclModule(bases)
 	if (mod === undefined) {
 		return undefined
@@ -275,30 +138,21 @@ export async function openOfficialGrant(
 /** Directories under `root` that are protected and miss the capability Allow. */
 export function findProtectedDirs(
 	root: string,
-	opts: ProtectedDaclOptions & { recurse?: boolean; sid?: string } = {},
+	opts: ProtectedDaclOptions & { recurse?: boolean } = {},
 ): { hits: string[]; errors: string[]; error?: string } {
-	const file = ensureScript()
-	if (file === null) {
-		return { error: 'cannot extract the PowerShell helper', errors: [], hits: [] }
+	const walk: WalkOptions = { recurse: opts.recurse === true }
+	if (opts.reader !== undefined) {
+		walk.reader = opts.reader
 	}
 	const sid = opts.sid ?? workspaceCapabilitySid(root)
-	const args = scanArgs(file, root, sid, opts.recurse === true)
-	let lastError = ''
-	for (const shell of shells()) {
-		const r = spawnSync(shell, args, {
-			encoding: 'utf8',
-			maxBuffer: 16 * 1024 * 1024,
-			timeout: opts.timeoutMs ?? 300_000,
-			windowsHide: true,
-		})
-		const outcome = parseScanOutcome(r.stdout ?? '')
-		if (outcome !== undefined) {
-			return outcome
-		}
-		lastError =
-			r.error?.message ?? r.stderr?.trim() ?? `${shell} exited ${r.status ?? 'signal'}`
+	if (sid === '') {
+		// No capability SID on the root means the sandbox never granted this
+		// workspace (read-only mode, or Windows ACL sandbox off): there is
+		// nothing to back-fill, so do not walk and do not touch a DACL.
+		return { errors: [], hits: [] }
 	}
-	return { error: lastError || 'no PowerShell available', errors: [], hits: [] }
+	walk.sid = sid
+	return walkProtectedDirs(root, walk)
 }
 
 /** Apply the official three edits to each directory; standing ACES are kept. */
@@ -311,9 +165,7 @@ export async function grantProtectedDirs(
 	if (dirs.length === 0) {
 		return outcome
 	}
-	const factory =
-		opts.grantFactory ??
-		((workspaceRoot: string) => openOfficialGrant(workspaceRoot, opts.moduleBases))
+	const factory = opts.grantFactory ?? ((workspaceRoot: string) => openOfficialGrant(workspaceRoot, opts.moduleBases))
 	const handle = await factory(root)
 	if (handle === undefined) {
 		outcome.error = `cannot resolve ${ACL_PACKAGE} from the DSH installation`
